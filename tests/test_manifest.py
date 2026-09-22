@@ -2,6 +2,7 @@ from neurofusion_qa.manifest import (
     ManifestRecord,
     build_manifest_records,
     record_from_bids_file,
+    sha256_file,
 )
 from bids import BIDSLayout
 
@@ -122,3 +123,20 @@ def test_build_manifest_records_normalizes_path_to_posix():
     assert records[0].source_path is not None
     assert "\\" not in records[0].source_path
     assert not records[0].source_path.startswith("/")
+
+def test_sha256_file_matches_known_content(tmp_path):
+    path = tmp_path / "sample.bin"
+    path.write_bytes(b"IdentityGuard-BIDS")
+
+    assert sha256_file(path) == "4e1aba168268644929b58ab3b97bf43c379412cb209facf92ca63c6d56097ede"
+
+def test_build_manifest_records_includes_source_sha256():
+    records = build_manifest_records(
+        "tests/fixtures/bids_minimal",
+        dataset_namespace="openneuro:synthetic",
+        dataset_version="0.1.0",
+    )
+
+    assert len(records) == 1
+    assert records[0].source_sha256 is not None
+    assert len(records[0].source_sha256) == 64

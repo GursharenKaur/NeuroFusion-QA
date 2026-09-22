@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from bids import BIDSLayout
-
+import hashlib
 
 @dataclass(frozen=True)
 class ManifestRecord:
@@ -162,7 +162,7 @@ def build_manifest_records(
                 acquisition=record.acquisition,
                 run=record.run,
                 source_path=relative_path.as_posix(),
-                source_sha256=record.source_sha256,
+                source_sha256=sha256_file(bids_file.path),
                 derivative_recipe_sha256=record.derivative_recipe_sha256,
                 derivative_path=record.derivative_path,
                 derivative_sha256=record.derivative_sha256,
@@ -174,6 +174,22 @@ def build_manifest_records(
     records.sort(key=lambda record: record.source_path or "")
 
     return records
+
+def sha256_file(
+    path: str | Path,
+    *,
+    chunk_size: int = 1024 * 1024,
+) -> str:
+    """
+    Compute a file's SHA-256 digest using streaming chunks.
+    """
+    digest = hashlib.sha256()
+
+    with Path(path).open("rb") as file:
+        while chunk := file.read(chunk_size):
+            digest.update(chunk)
+
+    return digest.hexdigest()
 
 def _string_entity(value: Any) -> str | None:
     """Convert a PyBIDS entity value to a string without inventing values."""
