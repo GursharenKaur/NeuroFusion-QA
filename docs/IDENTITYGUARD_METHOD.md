@@ -116,3 +116,83 @@ This canonicalization procedure is an implementation convention rather than
 a requirement explicitly prescribed by the research handoff. It is fixed for
 the experiments using this implementation so that the corruption and audit
 behavior remain reproducible.
+
+## I3 Cross-Modal Pairing Conventions
+
+The research protocol requires cross-modal pairing to remain within the same
+namespace-qualified person key unless an authoritative hashed crosswalk is
+supplied. It also requires explicit session/task compatibility and prohibits
+identity inference from string similarity.
+
+The current implementation makes the following concrete choices where the
+handoff does not specify the representation.
+
+### Explicit pair representation
+
+The pairing checker receives an explicit sequence of record pairs:
+
+`[(left_record, right_record), ...]`
+
+IdentityGuard-BIDS does not generate a Cartesian product of records and does
+not infer which records should be paired. The upstream pairing operation must
+explicitly provide the proposed pairs to the audit engine.
+
+### Person identity
+
+Without an authoritative crosswalk, the left and right records must have
+exactly equal namespace-qualified person keys:
+
+`(dataset_namespace, dataset_version, participant_id)`
+
+Identical participant strings in different namespaces are therefore not
+considered sufficient evidence of identity.
+
+### Cross-dataset crosswalk
+
+Cross-dataset pairing is permitted only when an explicit
+`AuthoritativeCrosswalk` is supplied.
+
+The implementation requires the crosswalk to contain:
+
+- source
+- version
+- SHA-256 digest
+- approval identity
+- approval date
+- explicit mapping between namespace-qualified person keys
+
+The mapping is treated as authoritative input. IdentityGuard-BIDS never
+constructs it using participant-string similarity.
+
+### Session compatibility
+
+The implementation uses the following deterministic rule:
+
+- equal explicit session identifiers: compatible
+- both session identifiers absent: compatible
+- one absent and one present: incompatible
+- two different explicit session identifiers: incompatible
+
+This is a conservative fail-closed interpretation of missing pairing evidence.
+
+### Task compatibility
+
+Task compatibility follows the same rule:
+
+- equal explicit task identifiers: compatible
+- both task identifiers absent: compatible
+- one absent and one present: incompatible
+- two different explicit task identifiers: incompatible
+
+### Modality requirement
+
+A cross-modal pair must contain two explicit and different modality values.
+A pair containing the same modality on both sides is rejected.
+
+### Implementation-status note
+
+These representations and compatibility rules are implementation
+conventions selected to operationalize the protocol requirements. They are
+not claimed to be literal specifications from the frozen research handoff.
+They are fixed for reproducibility unless the research protocol is formally
+amended.

@@ -1,10 +1,12 @@
 from neurofusion_qa.identity import (
+    AuthoritativeCrosswalk,
     Finding,
     canonicalize_participant_id,
     check_i1_acquisition_key_injectivity,
     check_i1_canonicalization_collision,
     check_i1_namespace_completeness,
     check_i2_join_cardinality,
+    check_i3_cross_modal_pairing,
 )
 
 from neurofusion_qa.manifest import ManifestRecord
@@ -356,3 +358,269 @@ def test_i2_rejects_undeclared_relation():
     else:
         raise AssertionError("Expected ValueError")
 
+def test_i3_same_person_cross_modal_pair_is_clean():
+    left = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        session_id="ses-01",
+        modality="bold",
+        task="task-rest",
+    )
+
+    right = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        session_id="ses-01",
+        modality="eeg",
+        task="task-rest",
+    )
+
+    findings = check_i3_cross_modal_pairing(
+        [(left, right)]
+    )
+
+    assert findings == []
+
+def test_i3_detects_cross_modal_person_mismatch():
+    left = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        session_id="ses-01",
+        modality="bold",
+        task="task-rest",
+    )
+
+    right = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-02",
+        session_id="ses-01",
+        modality="eeg",
+        task="task-rest",
+    )
+
+    findings = check_i3_cross_modal_pairing(
+        [(left, right)]
+    )
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "I3.person_pairing"
+    assert findings[0].severity == "ERROR"
+
+def test_i3_does_not_accept_identical_participant_strings_across_namespaces():
+    left = ManifestRecord(
+        dataset_namespace="dataset-A",
+        dataset_version="1.0",
+        participant_id="sub-01",
+        session_id="ses-01",
+        modality="bold",
+        task="task-rest",
+    )
+
+    right = ManifestRecord(
+        dataset_namespace="dataset-B",
+        dataset_version="1.0",
+        participant_id="sub-01",
+        session_id="ses-01",
+        modality="eeg",
+        task="task-rest",
+    )
+
+    findings = check_i3_cross_modal_pairing(
+        [(left, right)]
+    )
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "I3.person_pairing"
+
+def test_i3_rejects_cross_dataset_pair_not_present_in_crosswalk():
+    left = ManifestRecord(
+        dataset_namespace="dataset-A",
+        dataset_version="1.0",
+        participant_id="sub-01",
+        session_id="ses-01",
+        modality="bold",
+        task="task-rest",
+    )
+
+    right = ManifestRecord(
+        dataset_namespace="dataset-B",
+        dataset_version="1.0",
+        participant_id="sub-42",
+        session_id="ses-01",
+        modality="eeg",
+        task="task-rest",
+    )
+
+    crosswalk = AuthoritativeCrosswalk(
+        source="approved_crosswalk.csv",
+        version="1.0",
+        sha256="abc123",
+        approved_by="PI",
+        approved_date="2026-09-22",
+        mapping={
+            left.person_key: (
+                "dataset-B",
+                "1.0",
+                "sub-99",
+            ),
+        },
+    )
+
+    findings = check_i3_cross_modal_pairing(
+        [(left, right)],
+        crosswalk=crosswalk,
+    )
+
+    assert any(
+        finding.rule_id == "I3.person_pairing"
+        for finding in findings
+    )
+
+def test_i3_detects_session_mismatch():
+    left = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        session_id="ses-01",
+        modality="bold",
+        task="task-rest",
+    )
+
+    right = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        session_id="ses-02",
+        modality="eeg",
+        task="task-rest",
+    )
+
+    findings = check_i3_cross_modal_pairing(
+        [(left, right)]
+    )
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "I3.session_compatibility"
+
+def test_i3_detects_task_mismatch():
+    left = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        session_id="ses-01",
+        modality="bold",
+        task="task-rest",
+    )
+
+    right = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        session_id="ses-01",
+        modality="eeg",
+        task="task-memory",
+    )
+
+    findings = check_i3_cross_modal_pairing(
+        [(left, right)]
+    )
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "I3.task_compatibility"
+
+def test_i3_missing_session_on_one_side_is_not_assumed_compatible():
+    left = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        session_id=None,
+        modality="bold",
+        task="task-rest",
+    )
+
+    right = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        session_id="ses-01",
+        modality="eeg",
+        task="task-rest",
+    )
+
+    findings = check_i3_cross_modal_pairing(
+        [(left, right)]
+    )
+
+    assert any(
+        finding.rule_id == "I3.session_compatibility"
+        for finding in findings
+    )
+
+def test_i3_rejects_same_modality_pair():
+    left = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        session_id="ses-01",
+        modality="bold",
+        task="task-rest",
+    )
+
+    right = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        session_id="ses-01",
+        modality="bold",
+        task="task-rest",
+    )
+
+    findings = check_i3_cross_modal_pairing(
+        [(left, right)]
+    )
+
+    assert any(
+        finding.rule_id == "I3.modality_pairing"
+        for finding in findings
+    )
+
+def test_i3_authoritative_crosswalk_allows_valid_cross_dataset_pair():
+    left = ManifestRecord(
+        dataset_namespace="dataset-A",
+        dataset_version="1.0",
+        participant_id="sub-01",
+        session_id="ses-01",
+        modality="bold",
+        task="task-rest",
+    )
+
+    right = ManifestRecord(
+        dataset_namespace="dataset-B",
+        dataset_version="1.0",
+        participant_id="sub-42",
+        session_id="ses-01",
+        modality="eeg",
+        task="task-rest",
+    )
+
+    crosswalk = AuthoritativeCrosswalk(
+        source="approved_crosswalk.csv",
+        version="1.0",
+        sha256="abc123",
+        approved_by="PI",
+        approved_date="2026-09-22",
+        mapping={
+            left.person_key: right.person_key,
+        },
+    )
+
+    findings = check_i3_cross_modal_pairing(
+        [(left, right)],
+        crosswalk=crosswalk,
+    )
+
+    assert findings == []

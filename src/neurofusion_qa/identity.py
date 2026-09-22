@@ -266,6 +266,242 @@ def check_i1_canonicalization_collision(
 
     return findings
 
+@dataclass(frozen=True)
+class AuthoritativeCrosswalk:
+    """
+    Explicit cross-dataset identity crosswalk.
+
+    Implementation convention:
+    A crosswalk must carry provenance metadata and an explicit mapping
+    between namespace-qualified person keys. IdentityGuard-BIDS never
+    derives this mapping from participant-string similarity.
+    """
+
+    source: str
+    version: str
+    sha256: str
+    approved_by: str
+    approved_date: str
+    mapping: dict[
+        tuple[str, str, str],
+        tuple[str, str, str],
+    ]
+
+
+def _session_task_compatible(
+    left_value: Any,
+    right_value: Any,
+) -> bool:
+    """
+    Apply the IdentityGuard-BIDS session/task compatibility convention.
+
+    Equal values are compatible.
+    Two explicit nulls are compatible.
+    A null paired with a value is incompatible.
+    Different explicit values are incompatible.
+    """
+    if left_value is None and right_value is None:
+        return True
+
+    if left_value is None or right_value is None:
+        return False
+
+    return left_value == right_value
+
+
+def _crosswalk_maps_persons(
+    left_key: tuple[str, str, str],
+    right_key: tuple[str, str, str],
+    crosswalk: AuthoritativeCrosswalk,
+) -> bool:
+    """
+    Check whether an authoritative crosswalk explicitly establishes
+    the supplied left/right person relationship.
+    """
+    mapped_right = crosswalk.mapping.get(left_key)
+
+    return mapped_right == right_key
+
+
+def check_i3_cross_modal_pairing(
+    pairs: list[tuple[Any, Any]],
+    *,
+    crosswalk: AuthoritativeCrosswalk | None = None,
+) -> list[Finding]:
+    """
+    Check explicit cross-modal record pairs.
+
+    Rules:
+    1. Records from the same dataset must have the same namespace-qualified
+       person key.
+    2. Cross-dataset identity requires an authoritative crosswalk.
+    3. Session and task values must satisfy the explicit compatibility rule.
+    4. A pair must contain two distinct modalities.
+
+    The function does not infer pairings and does not use participant-string
+    similarity to establish identity.
+    """
+    findings: list[Finding] = []
+
+    for pair_index, (left, right) in enumerate(pairs):
+        left_key = left.person_key
+        right_key = right.person_key
+
+        evidence = {
+            "pair_index": pair_index,
+            "left_person_key": left_key,
+            "right_person_key": right_key,
+            "left_session_id": left.session_id,
+            "right_session_id": right.session_id,
+            "left_task": left.task,
+            "right_task": right.task,
+            "left_modality": left.modality,
+            "right_modality": right.modality,
+        }
+
+        # --------------------------------------------------------------
+        # Person identity / provenance
+        # --------------------------------------------------------------
+        same_person = left_key == right_key
+
+        if not same_person:
+            crosswalk_valid = (
+                crosswalk is not None
+                and _crosswalk_maps_persons(
+                    left_key,
+                    right_key,
+                    crosswalk,
+                )
+            )
+
+            if not crosswalk_valid:
+                findings.append(
+                    Finding(
+                        rule_id="I3.person_pairing",
+                        severity="ERROR",
+                        message=(
+                            "Cross-modal pair does not have compatible "
+                            "namespace-qualified person identity."
+                        ),
+                        key_type="cross_modal_pair",
+                        affected_keys=((left_key, right_key),),
+                        expected=(
+                            "same namespace-qualified person key or "
+                            "explicit authoritative crosswalk mapping"
+                        ),
+                        observed={
+                            "left_person_key": left_key,
+                            "right_person_key": right_key,
+                            "crosswalk_supplied": crosswalk is not None,
+                        },
+                        evidence_rows=(evidence,),
+                        remediation=(
+                            "Verify the participant identities and namespaces. "
+                            "For cross-dataset pairing, supply an approved "
+                            "authoritative crosswalk with provenance metadata."
+                        ),
+                    )
+                )
+
+        # --------------------------------------------------------------
+        # Modality
+        # --------------------------------------------------------------
+        if (
+            left.modality is None
+            or right.modality is None
+            or left.modality == right.modality
+        ):
+            findings.append(
+                Finding(
+                    rule_id="I3.modality_pairing",
+                    severity="ERROR",
+                    message=(
+                        "Cross-modal pairing requires two explicit, "
+                        "different modality values."
+                    ),
+                    key_type="cross_modal_pair",
+                    affected_keys=((left_key, right_key),),
+                    expected="two explicit and different modality values",
+                    observed={
+                        "left_modality": left.modality,
+                        "right_modality": right.modality,
+                    },
+                    evidence_rows=(evidence,),
+                    remediation=(
+                        "Verify that the pair contains one record from each "
+                        "intended modality."
+                    ),
+                )
+            )
+
+        # --------------------------------------------------------------
+        # Session compatibility
+        # --------------------------------------------------------------
+        if not _session_task_compatible(
+            left.session_id,
+            right.session_id,
+        ):
+            findings.append(
+                Finding(
+                    rule_id="I3.session_compatibility",
+                    severity="ERROR",
+                    message=(
+                        "Cross-modal pair contains incompatible session "
+                        "identifiers."
+                    ),
+                    key_type="cross_modal_pair",
+                    affected_keys=((left_key, right_key),),
+                    expected=(
+                        "equal session identifiers or both session "
+                        "identifiers absent"
+                    ),
+                    observed={
+                        "left_session_id": left.session_id,
+                        "right_session_id": right.session_id,
+                    },
+                    evidence_rows=(evidence,),
+                    remediation=(
+                        "Verify that the records belong to compatible "
+                        "sessions before pairing them."
+                    ),
+                )
+            )
+
+        # --------------------------------------------------------------
+        # Task compatibility
+        # --------------------------------------------------------------
+        if not _session_task_compatible(
+            left.task,
+            right.task,
+        ):
+            findings.append(
+                Finding(
+                    rule_id="I3.task_compatibility",
+                    severity="ERROR",
+                    message=(
+                        "Cross-modal pair contains incompatible task "
+                        "identifiers."
+                    ),
+                    key_type="cross_modal_pair",
+                    affected_keys=((left_key, right_key),),
+                    expected=(
+                        "equal task identifiers or both task identifiers "
+                        "absent"
+                    ),
+                    observed={
+                        "left_task": left.task,
+                        "right_task": right.task,
+                    },
+                    evidence_rows=(evidence,),
+                    remediation=(
+                        "Verify that the records correspond to the same "
+                        "task before pairing them."
+                    ),
+                )
+            )
+
+    return findings
+
 def check_i2_join_cardinality(
     left_counts: dict[Any, int],
     right_counts: dict[Any, int],
