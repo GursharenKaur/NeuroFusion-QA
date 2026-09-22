@@ -116,6 +116,7 @@ def build_manifest_records(
     *,
     dataset_namespace: str,
     dataset_version: str,
+    metadata_only: bool = False,
 ) -> list[ManifestRecord]:
     """
     Build deterministic manifest records from a BIDS dataset.
@@ -162,7 +163,11 @@ def build_manifest_records(
                 acquisition=record.acquisition,
                 run=record.run,
                 source_path=relative_path.as_posix(),
-                source_sha256=sha256_file(bids_file.path),
+                source_sha256=(
+                    "not_retrieved"
+                    if metadata_only
+                    else sha256_file(bids_file.path)
+                ),
                 derivative_recipe_sha256=record.derivative_recipe_sha256,
                 derivative_path=record.derivative_path,
                 derivative_sha256=record.derivative_sha256,

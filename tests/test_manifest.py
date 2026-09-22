@@ -140,3 +140,14 @@ def test_build_manifest_records_includes_source_sha256():
     assert len(records) == 1
     assert records[0].source_sha256 is not None
     assert len(records[0].source_sha256) == 64
+
+def test_build_manifest_records_metadata_only_does_not_retrieve_source():
+    records = build_manifest_records(
+        "tests/fixtures/bids_minimal",
+        dataset_namespace="openneuro:synthetic",
+        dataset_version="0.1.0",
+        metadata_only=True,
+    )
+
+    assert len(records) == 1
+    assert records[0].source_sha256 == "not_retrieved"
