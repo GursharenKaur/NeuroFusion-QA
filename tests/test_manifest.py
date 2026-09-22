@@ -7,7 +7,7 @@ from neurofusion_qa.manifest import (
     sha256_file,
 )
 from bids import BIDSLayout
-
+from pathlib import Path
 
 def test_person_key_preserves_dataset_namespace_version_and_raw_participant_id():
     record = ManifestRecord(
@@ -178,3 +178,34 @@ def test_build_manifest_metadata_uses_dataset_description_hash():
     )
 
     assert metadata.dataset_metadata_hash == expected_hash
+
+def test_rebuilding_manifest_produces_identical_records():
+    first = build_manifest_records(
+        "tests/fixtures/bids_minimal",
+        dataset_namespace="openneuro:synthetic",
+        dataset_version="0.1.0",
+    )
+
+    second = build_manifest_records(
+        "tests/fixtures/bids_minimal",
+        dataset_namespace="openneuro:synthetic",
+        dataset_version="0.1.0",
+    )
+
+    assert first == second
+
+def test_manifest_records_never_expose_absolute_paths():
+    records = build_manifest_records(
+        "tests/fixtures/bids_minimal",
+        dataset_namespace="openneuro:synthetic",
+        dataset_version="0.1.0",
+    )
+
+    for record in records:
+        assert record.source_path is not None
+
+        path = Path(record.source_path)
+
+        assert not path.is_absolute()
+        assert "\\" not in record.source_path
+        assert ":" not in record.source_path
