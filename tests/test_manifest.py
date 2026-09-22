@@ -1,5 +1,7 @@
 from neurofusion_qa.manifest import (
+    ManifestMetadata,
     ManifestRecord,
+    build_manifest_metadata,
     build_manifest_records,
     record_from_bids_file,
     sha256_file,
@@ -151,3 +153,28 @@ def test_build_manifest_records_metadata_only_does_not_retrieve_source():
 
     assert len(records) == 1
     assert records[0].source_sha256 == "not_retrieved"
+
+def test_build_manifest_metadata_records_required_fields():
+    metadata = build_manifest_metadata(
+        "tests/fixtures/bids_minimal",
+        row_count=1,
+    )
+
+    assert isinstance(metadata, ManifestMetadata)
+    assert metadata.schema_version == "1.0"
+    assert metadata.tool_version == "0.1.0"
+    assert len(metadata.dataset_metadata_hash) == 64
+    assert metadata.row_count == 1
+    assert metadata.generation_time.endswith("+00:00")
+
+def test_build_manifest_metadata_uses_dataset_description_hash():
+    metadata = build_manifest_metadata(
+        "tests/fixtures/bids_minimal",
+        row_count=1,
+    )
+
+    expected_hash = sha256_file(
+        "tests/fixtures/bids_minimal/dataset_description.json"
+    )
+
+    assert metadata.dataset_metadata_hash == expected_hash

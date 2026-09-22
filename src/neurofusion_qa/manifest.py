@@ -6,6 +6,23 @@ from typing import Any, Optional
 
 from bids import BIDSLayout
 import hashlib
+from datetime import datetime, timezone
+
+@dataclass(frozen=True)
+class ManifestMetadata:
+    """
+    Metadata describing one generated IdentityGuard-BIDS manifest.
+
+    The field meanings are required by the research protocol. Exact
+    implementation values are provisional conventions and may be revised
+    if the project protocol is amended.
+    """
+
+    schema_version: str
+    tool_version: str
+    dataset_metadata_hash: str
+    row_count: int
+    generation_time: str
 
 @dataclass(frozen=True)
 class ManifestRecord:
@@ -220,3 +237,35 @@ def _relative_posix_path(path: str | Path) -> str:
     manifest-builder increment.
     """
     return Path(path).as_posix()
+
+def build_manifest_metadata(
+    dataset_root: str | Path,
+    *,
+    row_count: int,
+    schema_version: str = "1.0",
+    tool_version: str = "0.1.0",
+) -> ManifestMetadata:
+    """
+    Build metadata for a generated IdentityGuard-BIDS manifest.
+
+    Provisional implementation conventions:
+    - schema_version: "1.0"
+    - tool_version: "0.1.0"
+    - dataset metadata: dataset_description.json
+    - generation_time: UTC ISO-8601
+    """
+    root = Path(dataset_root).resolve()
+    metadata_path = root / "dataset_description.json"
+
+    if not metadata_path.is_file():
+        raise FileNotFoundError(
+            f"Missing BIDS dataset metadata file: {metadata_path}"
+        )
+
+    return ManifestMetadata(
+        schema_version=schema_version,
+        tool_version=tool_version,
+        dataset_metadata_hash=sha256_file(metadata_path),
+        row_count=row_count,
+        generation_time=datetime.now(timezone.utc).isoformat(),
+    )
