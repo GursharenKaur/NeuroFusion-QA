@@ -1,7 +1,10 @@
 from neurofusion_qa.identity import (
     Finding,
+    check_i1_acquisition_key_injectivity,
     check_i1_namespace_completeness,
+    check_i2_join_cardinality,
 )
+
 from neurofusion_qa.manifest import ManifestRecord
 
 def test_i1_namespace_completeness_clean():
@@ -174,3 +177,91 @@ def test_i1_acquisition_key_injectivity_detects_same_path_with_different_hash():
     assert finding.key_type == "acquisition_key"
     assert finding.affected_keys == (record_1.acquisition_key,)
     assert len(finding.evidence_rows) == 2
+
+def test_i2_one_to_one_clean():
+    findings = check_i2_join_cardinality(
+        {"sub-01": 1, "sub-02": 1},
+        {"sub-01": 1, "sub-02": 1},
+        relation="one_to_one",
+    )
+
+    assert findings == []
+
+
+def test_i2_one_to_one_detects_multiple_matches():
+    findings = check_i2_join_cardinality(
+        {"sub-01": 1},
+        {"sub-01": 2},
+        relation="one_to_one",
+    )
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "I2.cardinality_mismatch"
+    assert findings[0].severity == "ERROR"
+    assert findings[0].affected_keys == ("sub-01",)
+
+
+def test_i2_one_to_many_is_valid():
+    findings = check_i2_join_cardinality(
+        {"sub-01": 1},
+        {"sub-01": 3},
+        relation="one_to_many",
+    )
+
+    assert findings == []
+
+
+def test_i2_many_to_one_is_valid():
+    findings = check_i2_join_cardinality(
+        {"sub-01": 3},
+        {"sub-01": 1},
+        relation="many_to_one",
+    )
+
+    assert findings == []
+
+
+def test_i2_many_to_many_fails_closed():
+    findings = check_i2_join_cardinality(
+        {"sub-01": 2},
+        {"sub-01": 3},
+        relation="one_to_one",
+    )
+
+    rule_ids = {finding.rule_id for finding in findings}
+
+    assert "I2.many_to_many" in rule_ids
+    assert "I2.cardinality_mismatch" in rule_ids
+
+
+def test_i2_reports_unmatched_left_and_right_keys():
+    findings = check_i2_join_cardinality(
+        {"sub-01": 1, "sub-02": 1},
+        {"sub-01": 1, "sub-03": 1},
+        relation="one_to_one",
+    )
+
+    unmatched = next(
+        finding
+        for finding in findings
+        if finding.rule_id == "I2.unmatched_keys"
+    )
+
+    assert unmatched.severity == "ERROR"
+    assert set(unmatched.affected_keys) == {
+        "sub-02",
+        "sub-03",
+    }
+
+
+def test_i2_rejects_undeclared_relation():
+    try:
+        check_i2_join_cardinality(
+            {"sub-01": 1},
+            {"sub-01": 1},
+            relation="many_to_many",
+        )
+    except ValueError as exc:
+        assert "Unsupported join relation" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")

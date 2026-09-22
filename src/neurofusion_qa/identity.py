@@ -136,3 +136,172 @@ def check_i1_acquisition_key_injectivity(
         )
 
     return findings
+
+def check_i2_join_cardinality(
+    left_counts: dict[Any, int],
+    right_counts: dict[Any, int],
+    *,
+    relation: str,
+) -> list[Finding]:
+    """
+    Check observed join cardinality against a declared relation.
+
+    Supported declared relations:
+    - one_to_one
+    - one_to_many
+    - many_to_one
+
+    Unmatched keys and many-to-many relationships are reported explicitly.
+    """
+    allowed_relations = {
+        "one_to_one",
+        "one_to_many",
+        "many_to_one",
+    }
+
+    if relation not in allowed_relations:
+        raise ValueError(
+            f"Unsupported join relation: {relation!r}"
+        )
+
+    findings: list[Finding] = []
+
+    left_keys = set(left_counts)
+    right_keys = set(right_counts)
+
+    unmatched_left = sorted(left_keys - right_keys, key=str)
+    unmatched_right = sorted(right_keys - left_keys, key=str)
+
+    if unmatched_left or unmatched_right:
+        findings.append(
+            Finding(
+                rule_id="I2.unmatched_keys",
+                severity="ERROR",
+                message="Join contains unmatched keys.",
+                key_type="join_key",
+                affected_keys=tuple(
+                    unmatched_left + unmatched_right
+                ),
+                expected="all declared join keys are matched",
+                observed={
+                    "unmatched_left": len(unmatched_left),
+                    "unmatched_right": len(unmatched_right),
+                },
+                evidence_rows=tuple(
+                    [
+                        {
+                            "side": "left",
+                            "key": key,
+                            "count": left_counts[key],
+                        }
+                        for key in unmatched_left
+                    ]
+                    + [
+                        {
+                            "side": "right",
+                            "key": key,
+                            "count": right_counts[key],
+                        }
+                        for key in unmatched_right
+                    ]
+                ),
+                remediation=(
+                    "Review the unmatched keys and verify that the "
+                    "declared join relation and source manifests are correct."
+                ),
+            )
+        )
+
+    common_keys = left_keys & right_keys
+
+    violating_keys: list[Any] = []
+    evidence_rows: list[Any] = []
+
+    for key in sorted(common_keys, key=str):
+        left_count = left_counts[key]
+        right_count = right_counts[key]
+
+        is_valid = False
+
+        if relation == "one_to_one":
+            is_valid = left_count == 1 and right_count == 1
+
+        elif relation == "one_to_many":
+            is_valid = left_count == 1 and right_count >= 1
+
+        elif relation == "many_to_one":
+            is_valid = left_count >= 1 and right_count == 1
+
+        if not is_valid:
+            violating_keys.append(key)
+            evidence_rows.append(
+                {
+                    "key": key,
+                    "left_count": left_count,
+                    "right_count": right_count,
+                }
+            )
+
+    if violating_keys:
+        findings.append(
+            Finding(
+                rule_id="I2.cardinality_mismatch",
+                severity="ERROR",
+                message=(
+                    "Observed join cardinality does not match "
+                    "the declared relation."
+                ),
+                key_type="join_key",
+                affected_keys=tuple(violating_keys),
+                expected=relation,
+                observed=tuple(evidence_rows),
+                evidence_rows=tuple(evidence_rows),
+                remediation=(
+                    "Verify the declared relation and inspect the "
+                    "multiplicity of the affected join keys."
+                ),
+            )
+        )
+
+    many_to_many_keys = tuple(
+        key
+        for key in sorted(common_keys, key=str)
+        if left_counts[key] > 1 and right_counts[key] > 1
+    )
+
+    if many_to_many_keys:
+        findings.append(
+            Finding(
+                rule_id="I2.many_to_many",
+                severity="ERROR",
+                message=(
+                    "Many-to-many join detected; such joins fail closed "
+                    "unless separately approved and justified."
+                ),
+                key_type="join_key",
+                affected_keys=many_to_many_keys,
+                expected="no many-to-many join",
+                observed=tuple(
+                    {
+                        "key": key,
+                        "left_count": left_counts[key],
+                        "right_count": right_counts[key],
+                    }
+                    for key in many_to_many_keys
+                ),
+                evidence_rows=tuple(
+                    {
+                        "key": key,
+                        "left_count": left_counts[key],
+                        "right_count": right_counts[key],
+                    }
+                    for key in many_to_many_keys
+                ),
+                remediation=(
+                    "Do not perform the many-to-many join unless it has "
+                    "been separately approved and justified."
+                ),
+            )
+        )
+
+    return findings
