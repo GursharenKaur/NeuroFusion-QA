@@ -1,6 +1,8 @@
 from neurofusion_qa.identity import (
     Finding,
+    canonicalize_participant_id,
     check_i1_acquisition_key_injectivity,
+    check_i1_canonicalization_collision,
     check_i1_namespace_completeness,
     check_i2_join_cardinality,
 )
@@ -178,6 +180,94 @@ def test_i1_acquisition_key_injectivity_detects_same_path_with_different_hash():
     assert finding.affected_keys == (record_1.acquisition_key,)
     assert len(finding.evidence_rows) == 2
 
+def test_canonicalize_participant_id_normalizes_numeric_variants():
+    assert canonicalize_participant_id("sub-01") == "sub-1"
+    assert canonicalize_participant_id("sub-1") == "sub-1"
+    assert canonicalize_participant_id("SUB-01") == "sub-1"
+    assert canonicalize_participant_id("sub_01") == "sub-1"
+
+
+def test_i1_canonicalization_collision_detects_distinct_raw_ids():
+    records = [
+        ManifestRecord(
+            dataset_namespace="openneuro:synthetic",
+            dataset_version="0.1.0",
+            participant_id="sub-01",
+        ),
+        ManifestRecord(
+            dataset_namespace="openneuro:synthetic",
+            dataset_version="0.1.0",
+            participant_id="sub-1",
+        ),
+    ]
+
+    findings = check_i1_canonicalization_collision(records)
+
+    assert len(findings) == 1
+
+    finding = findings[0]
+
+    assert isinstance(finding, Finding)
+    assert finding.rule_id == "I1.canonicalization_collision"
+    assert finding.severity == "ERROR"
+    assert finding.key_type == "person_key"
+
+    assert set(finding.affected_keys) == {
+        (
+            "openneuro:synthetic",
+            "0.1.0",
+            "sub-01",
+        ),
+        (
+            "openneuro:synthetic",
+            "0.1.0",
+            "sub-1",
+        ),
+    }
+
+    assert finding.observed == {
+        "canonical_participant_id": "sub-1",
+        "raw_participant_ids": ("sub-01", "sub-1"),
+    }
+
+
+def test_i1_canonicalization_collision_accepts_same_raw_id():
+    records = [
+        ManifestRecord(
+            dataset_namespace="openneuro:synthetic",
+            dataset_version="0.1.0",
+            participant_id="sub-01",
+        ),
+        ManifestRecord(
+            dataset_namespace="openneuro:synthetic",
+            dataset_version="0.1.0",
+            participant_id="sub-01",
+        ),
+    ]
+
+    findings = check_i1_canonicalization_collision(records)
+
+    assert findings == []
+
+
+def test_i1_canonicalization_collision_is_namespace_qualified():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset-A",
+            dataset_version="1.0",
+            participant_id="sub-01",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset-B",
+            dataset_version="1.0",
+            participant_id="sub-1",
+        ),
+    ]
+
+    findings = check_i1_canonicalization_collision(records)
+
+    assert findings == []
+
 def test_i2_one_to_one_clean():
     findings = check_i2_join_cardinality(
         {"sub-01": 1, "sub-02": 1},
@@ -265,3 +355,4 @@ def test_i2_rejects_undeclared_relation():
         assert "Unsupported join relation" in str(exc)
     else:
         raise AssertionError("Expected ValueError")
+

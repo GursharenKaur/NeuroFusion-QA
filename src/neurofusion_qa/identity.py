@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+import re
+import unicodedata
 
 
 @dataclass(frozen=True)
@@ -131,6 +133,133 @@ def check_i1_acquisition_key_injectivity(
                     "Inspect the conflicting source records and verify "
                     "the participant, session, modality, task, acquisition, "
                     "and run identifiers against authoritative source metadata."
+                ),
+            )
+        )
+
+    return findings
+
+def canonicalize_participant_id(participant_id: str) -> str:
+    """
+    Return the canonical audit representation of a participant ID.
+
+    Implementation convention:
+    - Unicode NFKC normalization
+    - case folding
+    - removal of the leading BIDS 'sub' prefix
+    - common punctuation/separators treated equivalently
+    - numeric labels have leading zeroes removed
+    - canonical form is reconstructed as 'sub-<label>'
+
+    The original participant_id is never modified.
+    """
+    normalized = unicodedata.normalize("NFKC", participant_id)
+    normalized = normalized.casefold().strip()
+
+    # Remove the BIDS subject prefix and one or more separators.
+    label = re.sub(r"^sub[-_.\s]*", "", normalized)
+
+    # Treat punctuation/separators as equivalent.
+    label = re.sub(r"[-_.\s]+", "", label)
+
+    # Numeric participant labels are canonicalized by numeric value.
+    if label.isdigit():
+        label = str(int(label))
+
+    return f"sub-{label}"
+
+def check_i1_canonicalization_collision(
+    records: list[Any],
+) -> list[Finding]:
+    """
+    Detect distinct raw participant IDs that collapse to the same
+    canonical participant representation within one dataset namespace
+    and dataset version.
+
+    The raw participant IDs are preserved and reported as evidence.
+    """
+    grouped: dict[
+        tuple[str, str, str],
+        dict[str, list[tuple[int, Any]]],
+    ] = {}
+
+    for index, record in enumerate(records):
+        if not record.dataset_namespace:
+            continue
+
+        if not record.dataset_version:
+            continue
+
+        if not record.participant_id:
+            continue
+
+        canonical_id = canonicalize_participant_id(
+            record.participant_id
+        )
+
+        namespace_key = (
+            record.dataset_namespace,
+            record.dataset_version,
+            canonical_id,
+        )
+
+        grouped.setdefault(namespace_key, {}).setdefault(
+            record.participant_id,
+            [],
+        ).append((index, record))
+
+    findings: list[Finding] = []
+
+    for canonical_key, raw_groups in grouped.items():
+        if len(raw_groups) <= 1:
+            continue
+
+        evidence_rows = []
+
+        for raw_id in sorted(raw_groups):
+            for row_index, record in raw_groups[raw_id]:
+                evidence_rows.append(
+                    {
+                        "row_index": row_index,
+                        "dataset_namespace": record.dataset_namespace,
+                        "dataset_version": record.dataset_version,
+                        "raw_participant_id": raw_id,
+                        "canonical_participant_id": canonical_key[2],
+                    }
+                )
+
+        person_keys = tuple(
+            (
+                canonical_key[0],
+                canonical_key[1],
+                raw_id,
+            )
+            for raw_id in sorted(raw_groups)
+        )
+
+        findings.append(
+            Finding(
+                rule_id="I1.canonicalization_collision",
+                severity="ERROR",
+                message=(
+                    "Distinct raw participant IDs collapse to the same "
+                    "canonical participant representation."
+                ),
+                key_type="person_key",
+                affected_keys=person_keys,
+                expected=(
+                    "distinct raw participant IDs must remain distinct "
+                    "after canonicalization"
+                ),
+                observed={
+                    "canonical_participant_id": canonical_key[2],
+                    "raw_participant_ids": tuple(sorted(raw_groups)),
+                },
+                evidence_rows=tuple(evidence_rows),
+                remediation=(
+                    "Inspect the raw participant labels and preserve them "
+                    "as distinct identities unless an authoritative "
+                    "crosswalk explicitly establishes equivalence."
                 ),
             )
         )
