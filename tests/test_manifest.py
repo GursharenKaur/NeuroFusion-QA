@@ -1,5 +1,6 @@
 from neurofusion_qa.manifest import (
     ManifestRecord,
+    build_manifest_records,
     record_from_bids_file,
 )
 from bids import BIDSLayout
@@ -93,3 +94,31 @@ def test_record_from_bids_file_preserves_bids_entities():
     assert record.task == "task-rest"
     assert record.acquisition is None
     assert record.run == "01"
+
+def test_build_manifest_records_is_deterministic():
+    records = build_manifest_records(
+        "tests/fixtures/bids_minimal",
+        dataset_namespace="openneuro:synthetic",
+        dataset_version="0.1.0",
+    )
+
+    assert len(records) == 1
+
+    record = records[0]
+
+    assert record.participant_id == "sub-01"
+    assert record.source_path == (
+        "sub-01/func/sub-01_task-rest_run-01_bold.nii.gz"
+    )
+
+
+def test_build_manifest_records_normalizes_path_to_posix():
+    records = build_manifest_records(
+        "tests/fixtures/bids_minimal",
+        dataset_namespace="openneuro:synthetic",
+        dataset_version="0.1.0",
+    )
+
+    assert records[0].source_path is not None
+    assert "\\" not in records[0].source_path
+    assert not records[0].source_path.startswith("/")
