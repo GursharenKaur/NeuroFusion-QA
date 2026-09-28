@@ -611,3 +611,248 @@ def test_c3_rejects_invalid_affected_count():
             "Expected ValueError when affected_count exceeds "
             "available records."
         )
+
+def test_c4_permutates_cross_modal_pairing():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            session_id="ses-01",
+            modality="T1w",
+            source_path="sub-01_T1w.nii.gz",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            session_id="ses-01",
+            modality="bold",
+            source_path="sub-01_bold.nii.gz",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            session_id="ses-01",
+            modality="T1w",
+            source_path="sub-02_T1w.nii.gz",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            session_id="ses-01",
+            modality="bold",
+            source_path="sub-02_bold.nii.gz",
+        ),
+    ]
+
+    corrupted, truth = inject_corruption(
+        records,
+        corruption="C4_cross_modal_permutation",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    assert len(corrupted) == len(records)
+    assert truth["corruption"] == "C4_cross_modal_permutation"
+    assert "I3.person_pairing" in truth["expected_violations"]
+
+
+def test_c4_preserves_raw_records():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="T1w",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="bold",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="T1w",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="bold",
+        ),
+    ]
+
+    original = list(records)
+
+    inject_corruption(
+        records,
+        corruption="C4_cross_modal_permutation",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    assert records == original
+
+
+def test_c4_does_not_change_number_of_records():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="T1w",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="bold",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="T1w",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="bold",
+        ),
+    ]
+
+    corrupted, _ = inject_corruption(
+        records,
+        corruption="C4_cross_modal_permutation",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    assert len(corrupted) == len(records)
+
+
+def test_c4_truth_contains_required_metadata():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="T1w",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="bold",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="T1w",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="bold",
+        ),
+    ]
+
+    _, truth = inject_corruption(
+        records,
+        corruption="C4_cross_modal_permutation",
+        affected_count=1,
+        seed=12345,
+    )
+
+    assert truth["seed"] == 12345
+    assert "parent_manifest_sha256" in truth
+    assert "operations" in truth
+    assert "affected_keys" in truth
+    assert "expected_violations" in truth
+    assert "I3.person_pairing" in truth["expected_violations"]
+
+
+def test_c4_is_deterministic_for_same_seed():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="T1w",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="bold",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="T1w",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="bold",
+        ),
+    ]
+
+    corrupted_a, truth_a = inject_corruption(
+        records,
+        corruption="C4_cross_modal_permutation",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    corrupted_b, truth_b = inject_corruption(
+        records,
+        corruption="C4_cross_modal_permutation",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    assert corrupted_a == corrupted_b
+    assert truth_a == truth_b
+
+
+def test_c4_rejects_invalid_affected_count():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="T1w",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="bold",
+        ),
+    ]
+
+    try:
+        inject_corruption(
+            records,
+            corruption="C4_cross_modal_permutation",
+            affected_count=2,
+            seed=20270915,
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            "Expected ValueError for invalid affected_count."
+        )

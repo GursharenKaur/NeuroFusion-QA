@@ -244,6 +244,136 @@ def _inject_c2_canonicalization_collision(
 
     return corrupted, truth
 
+def _inject_c4_cross_modal_permutation(
+    records: list[Any],
+    *,
+    affected_count: int,
+    seed: int,
+):
+    """
+    Create cross-modal identity permutations.
+
+    Each corruption instance reassigns the participant ID of one
+    modality-bearing record to a different participant in the same
+    dataset namespace/version.
+
+    The original records are never modified in place.
+    """
+    if affected_count < 1:
+        raise ValueError("affected_count must be at least 1.")
+
+    eligible_indices = [
+        index
+        for index, record in enumerate(records)
+        if (
+            record.dataset_namespace is not None
+            and record.dataset_version is not None
+            and record.participant_id
+            and record.modality
+        )
+    ]
+
+    if len(eligible_indices) < 2:
+        raise ValueError(
+            "C4 requires at least two eligible modality records."
+        )
+
+    rng = random.Random(seed)
+    corrupted = list(records)
+
+    operations = []
+    affected_keys = []
+
+    available_sources = list(eligible_indices)
+
+    for _ in range(affected_count):
+        if not available_sources:
+            raise ValueError(
+                "Not enough eligible records for the requested "
+                "affected_count."
+            )
+
+        rng.shuffle(available_sources)
+
+        source_index = None
+        target_index = None
+
+        for candidate_source in available_sources:
+            source = corrupted[candidate_source]
+
+            for candidate_target in eligible_indices:
+                if candidate_source == candidate_target:
+                    continue
+
+                target = records[candidate_target]
+
+                # Keep the permutation within the same
+                # namespace/version.
+                if (
+                    source.dataset_namespace
+                    != target.dataset_namespace
+                    or source.dataset_version
+                    != target.dataset_version
+                ):
+                    continue
+
+                # Must be a different participant.
+                if source.person_key == target.person_key:
+                    continue
+
+                source_index = candidate_source
+                target_index = candidate_target
+                break
+
+            if source_index is not None:
+                break
+
+        if source_index is None or target_index is None:
+            raise ValueError(
+                "Unable to construct a valid C4 cross-modal "
+                "permutation from the supplied records."
+            )
+
+        source = corrupted[source_index]
+        target = records[target_index]
+
+        original_person_key = source.person_key
+
+        corrupted[source_index] = replace(
+            source,
+            participant_id=target.participant_id,
+        )
+
+        affected_keys.append(original_person_key)
+
+        operations.append(
+            {
+                "operation": (
+                    "reassign_modality_record_to_other_participant"
+                ),
+                "source_row_index": source_index,
+                "target_row_index": target_index,
+                "original_person_key": original_person_key,
+                "new_person_key": corrupted[source_index].person_key,
+                "modality": source.modality,
+            }
+        )
+
+        available_sources.remove(source_index)
+
+    truth = {
+        "corruption": "C4_cross_modal_permutation",
+        "seed": seed,
+        "parent_manifest_sha256": _manifest_hash(records),
+        "operations": operations,
+        "affected_keys": affected_keys,
+        "expected_violations": [
+            "I3.person_pairing",
+        ],
+    }
+
+    return corrupted, truth
+
 def inject_corruption(
     records: list[Any],
     *,
@@ -279,6 +409,13 @@ def inject_corruption(
     
     if corruption == "C3_duplicate_propagation":
         return _inject_c3_duplicate_propagation(
+            clean_records,
+            affected_count=affected_count,
+            seed=seed,
+        )
+
+    if corruption == "C4_cross_modal_permutation":
+        return _inject_c4_cross_modal_permutation(
             clean_records,
             affected_count=affected_count,
             seed=seed,
@@ -350,6 +487,155 @@ def _inject_c3_duplicate_propagation(
             "I4.repeated_row",
             "I4.repeated_source_path",
             "I6.denominator_mismatch",
+        ],
+    }
+
+    return corrupted, truth
+
+def _inject_c4_cross_modal_permutation(
+    records: list[Any],
+    *,
+    affected_count: int,
+    seed: int,
+):
+    """
+    Permute cross-modal identity assignment.
+
+    For each corruption instance, select two records from different
+    participants and reassign the participant ID of one modality-B
+    record to the other participant.
+
+    The underlying acquisition/source evidence is preserved.
+
+    `affected_count` denotes the number of corrupted modality-B records.
+
+    The clean input is never modified in place.
+    """
+    if affected_count < 1:
+        raise ValueError("affected_count must be at least 1.")
+
+    if affected_count > len(records):
+        raise ValueError(
+            "affected_count cannot exceed the number of available records."
+        )
+
+    # We need at least two distinct participant identities.
+    participant_keys = {
+        record.person_key
+        for record in records
+        if record.dataset_namespace is not None
+        and record.dataset_version is not None
+        and record.participant_id
+    }
+
+    if len(participant_keys) < 2:
+        raise ValueError(
+            "C4 requires at least two distinct participant identities."
+        )
+
+    rng = random.Random(seed)
+
+    # Work with records that have an explicit modality and identity.
+    eligible_indices = [
+        index
+        for index, record in enumerate(records)
+        if record.dataset_namespace is not None
+        and record.dataset_version is not None
+        and record.participant_id
+        and record.modality
+    ]
+
+    if len(eligible_indices) < 2:
+        raise ValueError(
+            "C4 requires at least two modality-bearing records."
+        )
+
+    corrupted = list(records)
+    operations = []
+    affected_keys = []
+
+    available = list(eligible_indices)
+
+    for _ in range(affected_count):
+        if len(available) < 2:
+            raise ValueError(
+                "Not enough eligible records for the requested "
+                "number of C4 corruption instances."
+            )
+
+        rng.shuffle(available)
+
+        source_index = None
+        target_index = None
+
+        for candidate_source in available:
+            source = corrupted[candidate_source]
+
+            for candidate_target in available:
+                if candidate_source == candidate_target:
+                    continue
+
+                target = corrupted[candidate_target]
+
+                # Keep the corruption within the same namespace/version.
+                if (
+                    source.dataset_namespace != target.dataset_namespace
+                    or source.dataset_version != target.dataset_version
+                ):
+                    continue
+
+                # The two records must belong to different participants.
+                if source.person_key == target.person_key:
+                    continue
+
+                source_index = candidate_source
+                target_index = candidate_target
+                break
+
+            if source_index is not None:
+                break
+
+        if source_index is None or target_index is None:
+            raise ValueError(
+                "Unable to construct a valid C4 cross-modal permutation "
+                "from the supplied records."
+            )
+
+        source = corrupted[source_index]
+        target = corrupted[target_index]
+
+        original_source_key = source.person_key
+        new_participant_id = target.participant_id
+
+        corrupted[source_index] = replace(
+            source,
+            participant_id=new_participant_id,
+        )
+
+        affected_keys.append(original_source_key)
+
+        operations.append(
+            {
+                "operation": "reassign_modality_record_to_other_participant",
+                "source_row_index": source_index,
+                "target_row_index": target_index,
+                "original_person_key": original_source_key,
+                "new_person_key": corrupted[source_index].person_key,
+                "modality": source.modality,
+            }
+        )
+
+        # Prevent the same source record from being selected again.
+        available.remove(source_index)
+
+    truth = {
+        "corruption": "C4_cross_modal_permutation",
+        "seed": seed,
+        "parent_manifest_sha256": _manifest_hash(records),
+        "operations": operations,
+        "affected_keys": affected_keys,
+        "expected_violations": [
+            "I3.person_pairing",
         ],
     }
 
