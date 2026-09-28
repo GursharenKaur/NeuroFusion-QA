@@ -217,3 +217,187 @@ def check_i4_repeated_paths_or_rows(
         )
 
     return findings
+
+def check_i4_derivative_lineage(
+    records: list[Any],
+) -> list[Finding]:
+    """
+    Validate derivative lineage completeness and derivative-key uniqueness.
+
+    Implementation convention:
+    derivative_key =
+        (acquisition_key, derivative_recipe_sha256, derivative_path)
+
+    The acquisition_key represents the declared parent acquisition.
+    """
+
+    findings: list[Finding] = []
+
+    derivative_records = [
+        record
+        for record in records
+        if record.derivative_path is not None
+        or record.derivative_sha256 is not None
+        or record.derivative_recipe_sha256 is not None
+    ]
+
+    # ---------------------------------------------------------
+    # 1. Validate derivative lineage completeness.
+    # ---------------------------------------------------------
+    for record in derivative_records:
+        missing_fields = []
+
+        if not record.derivative_recipe_sha256:
+            missing_fields.append("derivative_recipe_sha256")
+
+        if not record.derivative_path:
+            missing_fields.append("derivative_path")
+
+        if missing_fields:
+            findings.append(
+                Finding(
+                    rule_id="I4.derivative_lineage_incomplete",
+                    severity="ERROR",
+                    message=(
+                        "Derivative record is missing required lineage fields."
+                    ),
+                    key_type="derivative_key",
+                    affected_keys=(record.acquisition_key,),
+                    expected=(
+                        "every derivative has a recipe hash and "
+                        "derivative output path"
+                    ),
+                    observed={
+                        "missing_fields": tuple(missing_fields),
+                        "derivative_path": record.derivative_path,
+                        "derivative_recipe_sha256": (
+                            record.derivative_recipe_sha256
+                        ),
+                    },
+                    evidence_rows=(record,),
+                    remediation=(
+                        "Provide the derivative recipe/configuration hash "
+                        "and derivative output path before treating the "
+                        "derivative as a traceable analysis artifact."
+                    ),
+                )
+            )
+
+    # ---------------------------------------------------------
+    # 2. Validate that the parent acquisition is identifiable.
+    #
+    # BIDS acquisition entities may legitimately be absent.
+    # Therefore None in session/task/acquisition/run does not by
+    # itself mean that parent lineage is missing.
+    # ---------------------------------------------------------
+    for record in derivative_records:
+        required_parent_fields = {
+            "dataset_namespace": record.dataset_namespace,
+            "dataset_version": record.dataset_version,
+            "participant_id": record.participant_id,
+        }
+
+        missing_parent_fields = tuple(
+            field
+            for field, value in required_parent_fields.items()
+            if value is None or value == ""
+        )
+
+        if missing_parent_fields:
+            findings.append(
+                Finding(
+                    rule_id="I4.missing_parent_acquisition",
+                    severity="ERROR",
+                    message=(
+                        "Derivative record does not contain sufficient "
+                        "information to identify its parent acquisition."
+                    ),
+                    key_type="acquisition_key",
+                    affected_keys=(record.acquisition_key,),
+                    expected=(
+                        "a derivative has sufficient identity information "
+                        "to identify its parent acquisition"
+                    ),
+                    observed={
+                        "missing_parent_fields": missing_parent_fields,
+                    },
+                    evidence_rows=(record,),
+                    remediation=(
+                        "Restore the required parent identity identifiers "
+                        "before treating the derivative as traceable."
+                    ),
+                )
+            )
+
+    # ---------------------------------------------------------
+    # 3. Detect conflicting output hashes for the same
+    #    declared derivative key.
+    # ---------------------------------------------------------
+    derivative_key_groups: dict[tuple[Any, ...], list[Any]] = {}
+
+    for record in derivative_records:
+        if not record.derivative_recipe_sha256:
+            continue
+
+        if not record.derivative_path:
+            continue
+
+        derivative_key = (
+            record.acquisition_key,
+            record.derivative_recipe_sha256,
+            record.derivative_path,
+        )
+
+        derivative_key_groups.setdefault(
+            derivative_key,
+            [],
+        ).append(record)
+
+    for derivative_key, matching_records in derivative_key_groups.items():
+        hashes = {
+            record.derivative_sha256
+            for record in matching_records
+            if record.derivative_sha256
+            and record.derivative_sha256 != "not_retrieved"
+        }
+
+        if len(hashes) <= 1:
+            continue
+
+        findings.append(
+            Finding(
+                rule_id="I4.derivative_key_collision",
+                severity="ERROR",
+                message=(
+                    "One declared derivative key corresponds to multiple "
+                    "different derivative file hashes."
+                ),
+                key_type="derivative_key",
+                affected_keys=(derivative_key,),
+                expected=(
+                    "one derivative key resolves to at most one retrieved "
+                    "derivative content hash"
+                ),
+                observed={
+                    "distinct_derivative_hashes": tuple(sorted(hashes)),
+                },
+                evidence_rows=tuple(
+                    {
+                        "derivative_key": derivative_key,
+                        "derivative_path": record.derivative_path,
+                        "derivative_recipe_sha256": (
+                            record.derivative_recipe_sha256
+                        ),
+                        "derivative_sha256": record.derivative_sha256,
+                    }
+                    for record in matching_records
+                ),
+                remediation=(
+                    "Inspect the derivative recipe, output path, and "
+                    "generated file hashes for an inconsistent or "
+                    "overwritten derivative."
+                ),
+            )
+        )
+
+    return findings
