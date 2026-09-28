@@ -276,7 +276,81 @@ def inject_corruption(
             affected_count=affected_count,
             seed=seed,
         )
+    
+    if corruption == "C3_duplicate_propagation":
+        return _inject_c3_duplicate_propagation(
+            clean_records,
+            affected_count=affected_count,
+            seed=seed,
+        )
 
     raise ValueError(
         f"Unsupported corruption type: {corruption!r}"
     )
+
+def _inject_c3_duplicate_propagation(
+    records: list[Any],
+    *,
+    affected_count: int,
+    seed: int,
+):
+    """
+    Duplicate selected manifest/acquisition rows.
+
+    `affected_count` is the number of source rows to duplicate.
+    Each selected row is copied once.
+
+    The clean input is never modified in place.
+    """
+    if affected_count < 1:
+        raise ValueError("affected_count must be at least 1.")
+
+    if affected_count > len(records):
+        raise ValueError(
+            "affected_count cannot exceed the number of available records."
+        )
+
+    rng = random.Random(seed)
+
+    selected_indices = sorted(
+        rng.sample(range(len(records)), affected_count)
+    )
+
+    corrupted = list(records)
+    operations = []
+    affected_keys = []
+
+    # Append duplicates rather than replacing the original rows.
+    # This preserves the original evidence while introducing the
+    # duplicate propagation corruption.
+    for index in selected_indices:
+        original = records[index]
+
+        corrupted.append(original)
+
+        affected_keys.append(original.acquisition_key)
+
+        operations.append(
+            {
+                "operation": "duplicate_manifest_row",
+                "source_row_index": index,
+                "duplicated_row_index": len(corrupted) - 1,
+                "affected_acquisition_key": original.acquisition_key,
+            }
+        )
+
+    truth = {
+        "corruption": "C3_duplicate_propagation",
+        "seed": seed,
+        "parent_manifest_sha256": _manifest_hash(records),
+        "operations": operations,
+        "affected_keys": affected_keys,
+        "expected_violations": [
+            "I2.cardinality_mismatch",
+            "I4.repeated_row",
+            "I4.repeated_source_path",
+            "I6.denominator_mismatch",
+        ],
+    }
+
+    return corrupted, truth
