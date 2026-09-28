@@ -7,6 +7,7 @@ from neurofusion_qa.identity import (
     check_i1_namespace_completeness,
     check_i2_join_cardinality,
     check_i3_cross_modal_pairing,
+    check_i5_split_independence,
 )
 
 from neurofusion_qa.manifest import ManifestRecord
@@ -626,3 +627,194 @@ def test_i3_authoritative_crosswalk_allows_valid_cross_dataset_pair():
     )
 
     assert findings == []
+
+def test_i5_person_split_is_clean():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            split="test",
+        ),
+    ]
+
+    findings = check_i5_split_independence(records)
+
+    assert findings == []
+
+
+def test_i5_detects_person_in_multiple_splits():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="test",
+        ),
+    ]
+
+    findings = check_i5_split_independence(records)
+
+    assert any(
+        finding.rule_id == "I5.person_split_leakage"
+        for finding in findings
+    )
+
+
+def test_i5_detects_source_hash_across_splits():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="train",
+            source_path="sub-01/a.nii.gz",
+            source_sha256="same-source-hash",
+        ),
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            split="test",
+            source_path="sub-02/b.nii.gz",
+            source_sha256="same-source-hash",
+        ),
+    ]
+
+    findings = check_i5_split_independence(records)
+
+    assert any(
+        finding.rule_id == "I5.source_split_leakage"
+        for finding in findings
+    )
+
+
+def test_i5_detects_derivative_hash_across_splits():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="train",
+            derivative_path="derivatives/a.nii.gz",
+            derivative_sha256="same-derivative-hash",
+        ),
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            split="test",
+            derivative_path="derivatives/b.nii.gz",
+            derivative_sha256="same-derivative-hash",
+        ),
+    ]
+
+    findings = check_i5_split_independence(records)
+
+    assert any(
+        finding.rule_id == "I5.derivative_split_leakage"
+        for finding in findings
+    )
+
+
+def test_i5_grouping_variable_is_clean_when_confined_to_one_split():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-03",
+            split="test",
+        ),
+    ]
+
+    grouping_variables = {
+        "family_id": {
+            "family-01": [
+                ("test", "1.0", "sub-01"),
+                ("test", "1.0", "sub-02"),
+            ],
+        }
+    }
+
+    findings = check_i5_split_independence(
+        records,
+        grouping_variables=grouping_variables,
+    )
+
+    assert findings == []
+
+def test_i5_detects_grouping_variable_across_splits():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            split="test",
+        ),
+    ]
+
+    grouping_variables = {
+        "family_id": {
+            "family-01": [
+                ("test", "1.0", "sub-01"),
+                ("test", "1.0", "sub-02"),
+            ],
+        }
+    }
+
+    findings = check_i5_split_independence(
+        records,
+        grouping_variables=grouping_variables,
+    )
+
+    assert any(
+        finding.rule_id == "I5.grouping_variable_split_leakage"
+        for finding in findings
+    )
+    
+def test_i5_missing_split_is_reported():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split=None,
+        ),
+    ]
+
+    findings = check_i5_split_independence(records)
+
+    assert any(
+        finding.rule_id == "I5.missing_split"
+        for finding in findings
+    )

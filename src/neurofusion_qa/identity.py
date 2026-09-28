@@ -670,3 +670,296 @@ def check_i2_join_cardinality(
         )
 
     return findings
+
+def check_i5_split_independence(
+    records,
+    *,
+    grouping_variables=None,
+):
+    """
+    Check split independence for person identities, source hashes,
+    derivative hashes, and explicitly declared grouping variables.
+
+    Implementation conventions:
+    - A person_key must occur in exactly one non-null split.
+    - A retrieved source hash must not occur across multiple splits.
+    - A retrieved derivative hash must not occur across multiple splits.
+    - Grouping variables are supplied explicitly as:
+        {
+            "variable_name": {
+                "group_value": [
+                    person_key,
+                    person_key,
+                    ...
+                ]
+            }
+        }
+    - A missing split is reported because split independence cannot be
+      established for an unassigned record.
+    - The values "not_retrieved" are excluded from hash leakage checks.
+    """
+
+    findings = []
+
+    # ---------------------------------------------------------
+    # I5.1 Split completeness
+    # ---------------------------------------------------------
+    missing_split_rows = []
+
+    for index, record in enumerate(records):
+        split = getattr(record, "split", None)
+
+        if split is None or str(split).strip() == "":
+            missing_split_rows.append(index)
+
+    if missing_split_rows:
+        findings.append(
+            Finding(
+                rule_id="I5.missing_split",
+                severity="ERROR",
+                message=(
+                    "One or more records have no split assignment; "
+                    "split independence cannot be established."
+                ),
+                key_type="record",
+                affected_keys=[],
+                expected="Every audited record has a split assignment.",
+                observed={
+                    "missing_split_rows": missing_split_rows,
+                },
+                evidence_rows=missing_split_rows,
+                remediation=(
+                    "Assign each record to an explicit analysis split "
+                    "before performing split-independence auditing."
+                ),
+            )
+        )
+
+    # ---------------------------------------------------------
+    # I5.2 Person split leakage
+    # ---------------------------------------------------------
+    person_splits = {}
+
+    for index, record in enumerate(records):
+        split = getattr(record, "split", None)
+
+        if split is None or str(split).strip() == "":
+            continue
+
+        person_key = record.person_key
+
+        person_splits.setdefault(person_key, []).append(
+            (str(split), index)
+        )
+
+    for person_key, entries in person_splits.items():
+        splits = sorted({split for split, _ in entries})
+
+        if len(splits) > 1:
+            evidence_rows = [
+                index
+                for _, index in entries
+            ]
+
+            findings.append(
+                Finding(
+                    rule_id="I5.person_split_leakage",
+                    severity="ERROR",
+                    message=(
+                        "A single person identity occurs in multiple "
+                        "analysis splits."
+                    ),
+                    key_type="person",
+                    affected_keys=[person_key],
+                    expected="Each person_key belongs to exactly one split.",
+                    observed={
+                        "splits": splits,
+                    },
+                    evidence_rows=evidence_rows,
+                    remediation=(
+                        "Keep all records belonging to the same person_key "
+                        "within one outer analysis split."
+                    ),
+                )
+            )
+
+    # ---------------------------------------------------------
+    # I5.3 Source-hash split leakage
+    # ---------------------------------------------------------
+    source_hash_splits = {}
+
+    for index, record in enumerate(records):
+        split = getattr(record, "split", None)
+        source_hash = getattr(record, "source_sha256", None)
+
+        if (
+            split is None
+            or str(split).strip() == ""
+            or source_hash is None
+            or source_hash == ""
+            or source_hash == "not_retrieved"
+        ):
+            continue
+
+        source_hash_splits.setdefault(source_hash, []).append(
+            (str(split), index)
+        )
+
+    for source_hash, entries in source_hash_splits.items():
+        splits = sorted({split for split, _ in entries})
+
+        if len(splits) > 1:
+            evidence_rows = [
+                index
+                for _, index in entries
+            ]
+
+            findings.append(
+                Finding(
+                    rule_id="I5.source_split_leakage",
+                    severity="ERROR",
+                    message=(
+                        "The same retrieved source content hash occurs "
+                        "across multiple analysis splits."
+                    ),
+                    key_type="source_hash",
+                    affected_keys=[source_hash],
+                    expected=(
+                        "A retrieved source_sha256 occurs in only one split."
+                    ),
+                    observed={
+                        "splits": splits,
+                    },
+                    evidence_rows=evidence_rows,
+                    remediation=(
+                        "Remove cross-split duplication of the same source "
+                        "content or correct the split assignments."
+                    ),
+                )
+            )
+
+    # ---------------------------------------------------------
+    # I5.4 Derivative-hash split leakage
+    # ---------------------------------------------------------
+    derivative_hash_splits = {}
+
+    for index, record in enumerate(records):
+        split = getattr(record, "split", None)
+        derivative_hash = getattr(record, "derivative_sha256", None)
+
+        if (
+            split is None
+            or str(split).strip() == ""
+            or derivative_hash is None
+            or derivative_hash == ""
+            or derivative_hash == "not_retrieved"
+        ):
+            continue
+
+        derivative_hash_splits.setdefault(
+            derivative_hash, []
+        ).append(
+            (str(split), index)
+        )
+
+    for derivative_hash, entries in derivative_hash_splits.items():
+        splits = sorted({split for split, _ in entries})
+
+        if len(splits) > 1:
+            evidence_rows = [
+                index
+                for _, index in entries
+            ]
+
+            findings.append(
+                Finding(
+                    rule_id="I5.derivative_split_leakage",
+                    severity="ERROR",
+                    message=(
+                        "The same retrieved derivative content hash occurs "
+                        "across multiple analysis splits."
+                    ),
+                    key_type="derivative_hash",
+                    affected_keys=[derivative_hash],
+                    expected=(
+                        "A retrieved derivative_sha256 occurs in only one split."
+                    ),
+                    observed={
+                        "splits": splits,
+                    },
+                    evidence_rows=evidence_rows,
+                    remediation=(
+                        "Remove cross-split duplication of the same "
+                        "derivative content or correct the split assignments."
+                    ),
+                )
+            )
+
+    # ---------------------------------------------------------
+    # I5.5 Explicit grouping-variable split leakage
+    # ---------------------------------------------------------
+    if grouping_variables:
+        record_splits_by_person = {}
+
+        for record in records:
+            split = getattr(record, "split", None)
+
+            if split is None or str(split).strip() == "":
+                continue
+
+            record_splits_by_person.setdefault(
+                record.person_key,
+                set(),
+            ).add(str(split))
+
+        for variable_name, groups in grouping_variables.items():
+            for group_value, person_keys in groups.items():
+                group_splits = set()
+                evidence_rows = []
+
+                for person_key in person_keys:
+                    splits = record_splits_by_person.get(
+                        person_key,
+                        set(),
+                    )
+
+                    group_splits.update(splits)
+
+                    for index, record in enumerate(records):
+                        if (
+                            record.person_key == person_key
+                            and getattr(record, "split", None)
+                        ):
+                            evidence_rows.append(index)
+
+                if len(group_splits) > 1:
+                    findings.append(
+                        Finding(
+                            rule_id="I5.grouping_variable_split_leakage",
+                            severity="ERROR",
+                            message=(
+                                "A declared grouping variable contains "
+                                "members assigned to multiple analysis splits."
+                            ),
+                            key_type="grouping_variable",
+                            affected_keys=[
+                                (variable_name, group_value)
+                            ],
+                            expected=(
+                                "Each grouping-variable value belongs "
+                                "to one analysis split."
+                            ),
+                            observed={
+                                "variable": variable_name,
+                                "value": group_value,
+                                "splits": sorted(group_splits),
+                            },
+                            evidence_rows=sorted(set(evidence_rows)),
+                            remediation=(
+                                "Keep all members of the same declared "
+                                "grouping variable within one outer split."
+                            ),
+                        )
+                    )
+
+    return findings
