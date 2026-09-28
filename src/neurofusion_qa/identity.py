@@ -963,3 +963,251 @@ def check_i5_split_independence(
                     )
 
     return findings
+
+def check_i6_metric_denominator_traceability(
+    records,
+    metrics,
+    populations,
+):
+    """
+    Check that analysis-metric denominators are traceable to an
+    explicitly declared audited population.
+
+    Implementation convention:
+    - Each metric declares a population_key.
+    - populations maps population keys to namespace-qualified person_keys.
+    - The expected denominator is the number of unique person_keys
+      in the declared population.
+    - numerator must satisfy 0 <= numerator <= denominator.
+    - denominator must be positive.
+    - The metric population must be explicitly declared.
+    """
+
+    findings = []
+
+    # ---------------------------------------------------------
+    # Build the set of audited person keys.
+    # ---------------------------------------------------------
+    audited_person_keys = {
+        record.person_key
+        for record in records
+    }
+
+    # ---------------------------------------------------------
+    # Validate each metric.
+    # ---------------------------------------------------------
+    for metric_index, metric in enumerate(metrics):
+
+        metric_name = metric.get("metric_name")
+        population_key = metric.get("population_key")
+
+        numerator = metric.get("numerator")
+        denominator = metric.get("denominator")
+
+        # -----------------------------------------------------
+        # I6.1 Population declaration
+        # -----------------------------------------------------
+        if not population_key:
+            findings.append(
+                Finding(
+                    rule_id="I6.missing_population_key",
+                    severity="ERROR",
+                    message=(
+                        "The metric does not declare the population "
+                        "from which its denominator was calculated."
+                    ),
+                    key_type="metric",
+                    affected_keys=[metric_name],
+                    expected=(
+                        "Every metric declares an explicit population_key."
+                    ),
+                    observed={
+                        "metric_index": metric_index,
+                        "population_key": population_key,
+                    },
+                    evidence_rows=[metric_index],
+                    remediation=(
+                        "Associate the metric with an explicitly "
+                        "declared audited population."
+                    ),
+                )
+            )
+
+            continue
+
+        if population_key not in populations:
+            findings.append(
+                Finding(
+                    rule_id="I6.untraceable_population",
+                    severity="ERROR",
+                    message=(
+                        "The metric references a population that is "
+                        "not present in the population registry."
+                    ),
+                    key_type="metric_population",
+                    affected_keys=[population_key],
+                    expected=(
+                        "Every metric population_key resolves to a "
+                        "declared population."
+                    ),
+                    observed={
+                        "metric": metric_name,
+                        "population_key": population_key,
+                    },
+                    evidence_rows=[metric_index],
+                    remediation=(
+                        "Declare the metric population and provide "
+                        "its namespace-qualified person keys."
+                    ),
+                )
+            )
+
+            continue
+
+        # -----------------------------------------------------
+        # I6.2 Denominator validity
+        # -----------------------------------------------------
+        if denominator is None or denominator <= 0:
+            findings.append(
+                Finding(
+                    rule_id="I6.invalid_denominator",
+                    severity="ERROR",
+                    message=(
+                        "The metric denominator is missing or "
+                        "not positive."
+                    ),
+                    key_type="metric",
+                    affected_keys=[metric_name],
+                    expected="Metric denominator is greater than zero.",
+                    observed={
+                        "denominator": denominator,
+                    },
+                    evidence_rows=[metric_index],
+                    remediation=(
+                        "Provide the actual positive denominator "
+                        "used to calculate the metric."
+                    ),
+                )
+            )
+
+        # -----------------------------------------------------
+        # I6.3 Numerator validity
+        # -----------------------------------------------------
+        if numerator is None:
+            findings.append(
+                Finding(
+                    rule_id="I6.invalid_numerator",
+                    severity="ERROR",
+                    message="The metric numerator is missing.",
+                    key_type="metric",
+                    affected_keys=[metric_name],
+                    expected="Metric numerator is explicitly recorded.",
+                    observed={
+                        "numerator": numerator,
+                    },
+                    evidence_rows=[metric_index],
+                    remediation=(
+                        "Record the numerator used to calculate "
+                        "the metric."
+                    ),
+                )
+            )
+
+        elif denominator is not None and denominator > 0:
+            if numerator < 0 or numerator > denominator:
+                findings.append(
+                    Finding(
+                        rule_id="I6.invalid_numerator",
+                        severity="ERROR",
+                        message=(
+                            "The metric numerator is outside the "
+                            "valid range defined by its denominator."
+                        ),
+                        key_type="metric",
+                        affected_keys=[metric_name],
+                        expected=(
+                            "0 <= numerator <= denominator."
+                        ),
+                        observed={
+                            "numerator": numerator,
+                            "denominator": denominator,
+                        },
+                        evidence_rows=[metric_index],
+                        remediation=(
+                            "Correct the numerator or denominator "
+                            "to match the recorded metric population."
+                        ),
+                    )
+                )
+
+        # -----------------------------------------------------
+        # I6.4 Denominator traceability
+        # -----------------------------------------------------
+        declared_population = populations[population_key]
+
+        population_person_keys = set(declared_population)
+
+        # The population itself must be represented in the audited
+        # records.
+        missing_person_keys = (
+            population_person_keys - audited_person_keys
+        )
+
+        if missing_person_keys:
+            findings.append(
+                Finding(
+                    rule_id="I6.untraceable_population",
+                    severity="ERROR",
+                    message=(
+                        "The declared metric population contains "
+                        "person keys that are absent from the audited records."
+                    ),
+                    key_type="metric_population",
+                    affected_keys=[population_key],
+                    expected=(
+                        "Every population member is represented "
+                        "in the audited manifest."
+                    ),
+                    observed={
+                        "missing_person_keys": sorted(
+                            missing_person_keys
+                        ),
+                    },
+                    evidence_rows=[metric_index],
+                    remediation=(
+                        "Ensure the metric population is constructed "
+                        "from the same audited manifest or explain "
+                        "the missing population members."
+                    ),
+                )
+            )
+
+        expected_denominator = len(population_person_keys)
+
+        if denominator != expected_denominator:
+            findings.append(
+                Finding(
+                    rule_id="I6.denominator_mismatch",
+                    severity="ERROR",
+                    message=(
+                        "The metric denominator does not match the "
+                        "size of its declared audited population."
+                    ),
+                    key_type="metric_population",
+                    affected_keys=[population_key],
+                    expected={
+                        "denominator": expected_denominator,
+                    },
+                    observed={
+                        "denominator": denominator,
+                        "population_size": expected_denominator,
+                    },
+                    evidence_rows=[metric_index],
+                    remediation=(
+                        "Reconcile the reported metric denominator "
+                        "with the explicitly declared population."
+                    ),
+                )
+            )
+
+    return findings

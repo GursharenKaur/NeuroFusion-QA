@@ -8,6 +8,7 @@ from neurofusion_qa.identity import (
     check_i2_join_cardinality,
     check_i3_cross_modal_pairing,
     check_i5_split_independence,
+    check_i6_metric_denominator_traceability,
 )
 
 from neurofusion_qa.manifest import ManifestRecord
@@ -801,7 +802,7 @@ def test_i5_detects_grouping_variable_across_splits():
         finding.rule_id == "I5.grouping_variable_split_leakage"
         for finding in findings
     )
-    
+
 def test_i5_missing_split_is_reported():
     records = [
         ManifestRecord(
@@ -816,5 +817,238 @@ def test_i5_missing_split_is_reported():
 
     assert any(
         finding.rule_id == "I5.missing_split"
+        for finding in findings
+    )
+
+def test_i6_metric_denominator_is_traceable():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="test",
+        ),
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            split="test",
+        ),
+    ]
+
+    populations = {
+        "test_population_v1": [
+            ("test", "1.0", "sub-01"),
+            ("test", "1.0", "sub-02"),
+        ]
+    }
+
+    metrics = [
+        {
+            "metric_name": "accuracy",
+            "split": "test",
+            "numerator": 2,
+            "denominator": 2,
+            "population_key": "test_population_v1",
+        }
+    ]
+
+    findings = check_i6_metric_denominator_traceability(
+        records,
+        metrics,
+        populations,
+    )
+
+    assert findings == []
+
+
+def test_i6_detects_denominator_mismatch():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="test",
+        ),
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            split="test",
+        ),
+    ]
+
+    populations = {
+        "test_population_v1": [
+            ("test", "1.0", "sub-01"),
+            ("test", "1.0", "sub-02"),
+        ]
+    }
+
+    metrics = [
+        {
+            "metric_name": "accuracy",
+            "split": "test",
+            "numerator": 1,
+            "denominator": 5,
+            "population_key": "test_population_v1",
+        }
+    ]
+
+    findings = check_i6_metric_denominator_traceability(
+        records,
+        metrics,
+        populations,
+    )
+
+    assert any(
+        finding.rule_id == "I6.denominator_mismatch"
+        for finding in findings
+    )
+
+
+def test_i6_detects_unknown_population():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="test",
+        ),
+    ]
+
+    populations = {}
+
+    metrics = [
+        {
+            "metric_name": "accuracy",
+            "split": "test",
+            "numerator": 1,
+            "denominator": 1,
+            "population_key": "unknown_population",
+        }
+    ]
+
+    findings = check_i6_metric_denominator_traceability(
+        records,
+        metrics,
+        populations,
+    )
+
+    assert any(
+        finding.rule_id == "I6.untraceable_population"
+        for finding in findings
+    )
+
+
+def test_i6_detects_missing_population_key():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="test",
+        ),
+    ]
+
+    populations = {
+        "test_population_v1": [
+            ("test", "1.0", "sub-01"),
+        ]
+    }
+
+    metrics = [
+        {
+            "metric_name": "accuracy",
+            "split": "test",
+            "numerator": 1,
+            "denominator": 1,
+        }
+    ]
+
+    findings = check_i6_metric_denominator_traceability(
+        records,
+        metrics,
+        populations,
+    )
+
+    assert any(
+        finding.rule_id == "I6.missing_population_key"
+        for finding in findings
+    )
+
+
+def test_i6_detects_invalid_numerator_denominator_relationship():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="test",
+        ),
+    ]
+
+    populations = {
+        "test_population_v1": [
+            ("test", "1.0", "sub-01"),
+        ]
+    }
+
+    metrics = [
+        {
+            "metric_name": "accuracy",
+            "split": "test",
+            "numerator": 2,
+            "denominator": 1,
+            "population_key": "test_population_v1",
+        }
+    ]
+
+    findings = check_i6_metric_denominator_traceability(
+        records,
+        metrics,
+        populations,
+    )
+
+    assert any(
+        finding.rule_id == "I6.invalid_numerator"
+        for finding in findings
+    )
+
+
+def test_i6_detects_nonpositive_denominator():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="test",
+        ),
+    ]
+
+    populations = {
+        "test_population_v1": [
+            ("test", "1.0", "sub-01"),
+        ]
+    }
+
+    metrics = [
+        {
+            "metric_name": "accuracy",
+            "split": "test",
+            "numerator": 0,
+            "denominator": 0,
+            "population_key": "test_population_v1",
+        }
+    ]
+
+    findings = check_i6_metric_denominator_traceability(
+        records,
+        metrics,
+        populations,
+    )
+
+    assert any(
+        finding.rule_id == "I6.invalid_denominator"
         for finding in findings
     )
