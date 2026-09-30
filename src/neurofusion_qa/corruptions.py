@@ -577,13 +577,142 @@ def _inject_c5_subject_split_leakage(
 
     return corrupted, truth
 
+def _inject_c6_denominator_mismatch(
+    records: list[Any],
+    *,
+    metrics: list[dict[str, Any]],
+    populations: dict[str, dict[str, Any]],
+    affected_count: int,
+    seed: int,
+):
+    if affected_count < 1:
+        raise ValueError("affected_count must be at least 1.")
+
+    if not metrics:
+        raise ValueError(
+            "C6 requires at least one metric record."
+        )
+
+    if populations is None:
+        raise ValueError(
+            "C6 requires population definitions."
+        )
+
+    eligible_indices = []
+
+    for index, metric in enumerate(metrics):
+        population_key = metric.get("population_key")
+
+        if not population_key:
+            continue
+
+        population = populations.get(population_key)
+
+        if population is None:
+            continue
+
+        person_keys = population.get("person_keys", [])
+
+        if not person_keys:
+            continue
+
+        actual_denominator = len(set(person_keys))
+
+        if actual_denominator <= 0:
+            continue
+
+        eligible_indices.append(index)
+
+    if affected_count > len(eligible_indices):
+        raise ValueError(
+            "affected_count cannot exceed the number of "
+            "eligible metrics."
+        )
+
+    rng = random.Random(seed)
+
+    selected_indices = sorted(
+        rng.sample(
+            eligible_indices,
+            affected_count,
+        )
+    )
+
+    corrupted_metrics = [
+        dict(metric)
+        for metric in metrics
+    ]
+
+    operations = []
+    affected_keys = []
+
+    for index in selected_indices:
+        original = metrics[index]
+
+        population_key = original["population_key"]
+        population = populations[population_key]
+
+        person_keys = population["person_keys"]
+        actual_denominator = len(set(person_keys))
+        original_denominator = original.get("denominator")
+
+        if actual_denominator <= 0:
+            raise ValueError(
+                "C6 requires a population with a positive "
+                "declared denominator."
+            )
+
+        # Choose a deterministic incorrect denominator.
+        if original_denominator == actual_denominator:
+            new_denominator = actual_denominator + 1
+        elif original_denominator > 0:
+            new_denominator = original_denominator + 1
+        else:
+            new_denominator = actual_denominator + 1
+
+        # Ensure the corrupted value is actually different from
+        # the traceable population denominator.
+        if new_denominator == actual_denominator:
+            new_denominator += 1
+
+        corrupted_metrics[index]["denominator"] = new_denominator
+
+        affected_keys.append(population_key)
+
+        operations.append(
+            {
+                "operation": "change_metric_denominator",
+                "metric_index": index,
+                "metric_name": original.get("metric_name"),
+                "population_key": population_key,
+                "original_denominator": original_denominator,
+                "actual_population_denominator": actual_denominator,
+                "new_denominator": new_denominator,
+            }
+        )
+
+    truth = {
+        "corruption": "C6_denominator_mismatch",
+        "seed": seed,
+        "parent_manifest_sha256": _manifest_hash(records),
+        "operations": operations,
+        "affected_keys": affected_keys,
+        "expected_violations": [
+            "I6.denominator_mismatch",
+        ],
+    }
+
+    return corrupted_metrics, truth
+
 def inject_corruption(
     records: list[Any],
     *,
     corruption: str,
     affected_count: int,
     seed: int,
-) -> tuple[list[Any], dict[str, Any]]:
+    metrics: list[dict[str, Any]] | None = None,
+    populations: dict[str, dict[str, Any]] | None = None,
+) -> tuple[Any, dict[str, Any]]:
     """
     Inject one documented corruption into a clean manifest.
 
@@ -593,6 +722,7 @@ def inject_corruption(
         C3_duplicate_propagation
         C4_cross_modal_permutation
         C5_subject_split_leakage
+        C6_denominator_mismatch
 
     The clean input is never modified in place.
     """
@@ -630,6 +760,32 @@ def inject_corruption(
     if corruption == "C5_subject_split_leakage":
         return _inject_c5_subject_split_leakage(
             clean_records,
+            affected_count=affected_count,
+            seed=seed,
+        )
+
+    if corruption == "C5_subject_split_leakage":
+        return _inject_c5_subject_split_leakage(
+            clean_records,
+            affected_count=affected_count,
+            seed=seed,
+        )
+    
+    if corruption == "C6_denominator_mismatch":
+        if metrics is None:
+            raise ValueError(
+                "C6_denominator_mismatch requires metrics."
+            )
+
+        if populations is None:
+            raise ValueError(
+                "C6_denominator_mismatch requires populations."
+            )
+
+        return _inject_c6_denominator_mismatch(
+            clean_records,
+            metrics=metrics,
+            populations=populations,
             affected_count=affected_count,
             seed=seed,
         )

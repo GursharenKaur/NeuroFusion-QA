@@ -1105,3 +1105,325 @@ def test_c5_is_deterministic_for_same_seed():
 
     assert corrupted_a == corrupted_b
     assert truth_a == truth_b
+
+def test_c6_creates_denominator_mismatch():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-03",
+            split="train",
+        ),
+    ]
+
+    metrics = [
+        {
+            "metric_name": "accuracy",
+            "population_key": "train_population",
+            "numerator": 2,
+            "denominator": 3,
+        }
+    ]
+
+    populations = {
+        "train_population": {
+            "person_keys": [
+                record.person_key
+                for record in records
+            ]
+        }
+    }
+
+    corrupted_metrics, truth = inject_corruption(
+        records,
+        corruption="C6_denominator_mismatch",
+        affected_count=1,
+        seed=20270915,
+        metrics=metrics,
+        populations=populations,
+    )
+
+    assert corrupted_metrics != metrics
+    assert truth["corruption"] == "C6_denominator_mismatch"
+    assert "I6.denominator_mismatch" in truth["expected_violations"]
+
+
+def test_c6_preserves_population_members():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            split="train",
+        ),
+    ]
+
+    metrics = [
+        {
+            "metric_name": "accuracy",
+            "population_key": "train_population",
+            "numerator": 1,
+            "denominator": 2,
+        }
+    ]
+
+    populations = {
+        "train_population": {
+            "person_keys": [
+                record.person_key
+                for record in records
+            ]
+        }
+    }
+
+    corrupted_metrics, _ = inject_corruption(
+        records,
+        corruption="C6_denominator_mismatch",
+        affected_count=1,
+        seed=12345,
+        metrics=metrics,
+        populations=populations,
+    )
+
+    assert (
+        corrupted_metrics[0]["denominator"]
+        != metrics[0]["denominator"]
+    )
+
+    assert populations["train_population"]["person_keys"] == [
+        record.person_key
+        for record in records
+    ]
+
+
+def test_c6_changes_only_denominator():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            split="train",
+        ),
+    ]
+
+    metrics = [
+        {
+            "metric_name": "accuracy",
+            "population_key": "train_population",
+            "numerator": 1,
+            "denominator": 2,
+            "extra_field": "preserve-me",
+        }
+    ]
+
+    populations = {
+        "train_population": {
+            "person_keys": [
+                record.person_key
+                for record in records
+            ]
+        }
+    }
+
+    corrupted_metrics, _ = inject_corruption(
+        records,
+        corruption="C6_denominator_mismatch",
+        affected_count=1,
+        seed=20270915,
+        metrics=metrics,
+        populations=populations,
+    )
+
+    corrupted = corrupted_metrics[0]
+
+    assert corrupted["metric_name"] == metrics[0]["metric_name"]
+    assert corrupted["population_key"] == metrics[0]["population_key"]
+    assert corrupted["numerator"] == metrics[0]["numerator"]
+    assert corrupted["extra_field"] == metrics[0]["extra_field"]
+    assert corrupted["denominator"] != metrics[0]["denominator"]
+
+
+def test_c6_does_not_modify_original_metrics():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            split="train",
+        ),
+    ]
+
+    metrics = [
+        {
+            "metric_name": "accuracy",
+            "population_key": "train_population",
+            "numerator": 1,
+            "denominator": 2,
+        }
+    ]
+
+    populations = {
+        "train_population": {
+            "person_keys": [
+                record.person_key
+                for record in records
+            ]
+        }
+    }
+
+    original_metrics = [dict(metric) for metric in metrics]
+
+    inject_corruption(
+        records,
+        corruption="C6_denominator_mismatch",
+        affected_count=1,
+        seed=20270915,
+        metrics=metrics,
+        populations=populations,
+    )
+
+    assert metrics == original_metrics
+
+
+def test_c6_truth_contains_required_metadata():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            split="train",
+        ),
+    ]
+
+    metrics = [
+        {
+            "metric_name": "accuracy",
+            "population_key": "train_population",
+            "numerator": 1,
+            "denominator": 2,
+        }
+    ]
+
+    populations = {
+        "train_population": {
+            "person_keys": [
+                record.person_key
+                for record in records
+            ]
+        }
+    }
+
+    _, truth = inject_corruption(
+        records,
+        corruption="C6_denominator_mismatch",
+        affected_count=1,
+        seed=12345,
+        metrics=metrics,
+        populations=populations,
+    )
+
+    assert truth["corruption"] == "C6_denominator_mismatch"
+    assert truth["seed"] == 12345
+    assert "parent_manifest_sha256" in truth
+    assert "operations" in truth
+    assert "affected_keys" in truth
+    assert "expected_violations" in truth
+    assert "I6.denominator_mismatch" in truth["expected_violations"]
+
+
+def test_c6_is_deterministic_for_same_seed():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-03",
+            split="train",
+        ),
+    ]
+
+    metrics = [
+        {
+            "metric_name": "accuracy",
+            "population_key": "train_population",
+            "numerator": 2,
+            "denominator": 3,
+        }
+    ]
+
+    populations = {
+        "train_population": {
+            "person_keys": [
+                record.person_key
+                for record in records
+            ]
+        }
+    }
+
+    corrupted_a, truth_a = inject_corruption(
+        records,
+        corruption="C6_denominator_mismatch",
+        affected_count=1,
+        seed=20270915,
+        metrics=metrics,
+        populations=populations,
+    )
+
+    corrupted_b, truth_b = inject_corruption(
+        records,
+        corruption="C6_denominator_mismatch",
+        affected_count=1,
+        seed=20270915,
+        metrics=metrics,
+        populations=populations,
+    )
+
+    assert corrupted_a == corrupted_b
+    assert truth_a == truth_b
