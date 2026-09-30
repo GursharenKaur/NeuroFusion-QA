@@ -374,6 +374,209 @@ def _inject_c4_cross_modal_permutation(
 
     return corrupted, truth
 
+def _inject_c5_subject_split_leakage(
+    records: list[Any],
+    *,
+    affected_count: int,
+    seed: int,
+):
+    """
+    Move selected records to a different analysis split while preserving
+    their participant and acquisition identity.
+
+    The resulting manifest can place records belonging to the same
+    participant in different splits.
+
+    `affected_count` is the number of records whose split assignment
+    is changed.
+
+    The clean input is never modified in place.
+    """
+    if affected_count < 1:
+        raise ValueError("affected_count must be at least 1.")
+
+    eligible_indices = [
+        index
+        for index, record in enumerate(records)
+        if record.split is not None
+    ]
+
+    if affected_count > len(eligible_indices):
+        raise ValueError(
+            "affected_count cannot exceed the number of records "
+            "with an explicit split."
+        )
+
+    available_splits = sorted(
+        {
+            record.split
+            for record in records
+            if record.split is not None
+        }
+    )
+
+    if len(available_splits) < 2:
+        raise ValueError(
+            "C5 requires at least two distinct split assignments."
+        )
+
+    rng = random.Random(seed)
+
+    selected_indices = sorted(
+        rng.sample(eligible_indices, affected_count)
+    )
+
+    corrupted = list(records)
+    operations = []
+    affected_keys = []
+
+    for index in selected_indices:
+        original = corrupted[index]
+
+        alternative_splits = [
+            split
+            for split in available_splits
+            if split != original.split
+        ]
+
+        new_split = rng.choice(alternative_splits)
+
+        corrupted[index] = replace(
+            original,
+            split=new_split,
+        )
+
+        affected_keys.append(original.person_key)
+
+        operations.append(
+            {
+                "operation": "move_record_to_different_split",
+                "source_row_index": index,
+                "affected_person_key": original.person_key,
+                "original_split": original.split,
+                "new_split": new_split,
+            }
+        )
+
+    truth = {
+        "corruption": "C5_subject_split_leakage",
+        "seed": seed,
+        "parent_manifest_sha256": _manifest_hash(records),
+        "operations": operations,
+        "affected_keys": affected_keys,
+        "expected_violations": [
+            "I5.person_split_leakage",
+        ],
+    }
+
+    return corrupted, truth
+
+def _inject_c5_subject_split_leakage(
+    records: list[Any],
+    *,
+    affected_count: int,
+    seed: int,
+):
+    if affected_count < 1:
+        raise ValueError("affected_count must be at least 1.")
+
+    available_splits = sorted(
+        {
+            record.split
+            for record in records
+            if record.split is not None
+        }
+    )
+
+    if len(available_splits) < 2:
+        raise ValueError(
+            "C5 requires at least two distinct split assignments."
+        )
+
+    # Group records by person, but only consider people who have
+    # at least two records currently assigned to the same split.
+    person_split_groups: dict[tuple[Any, ...], dict[str, list[int]]] = {}
+
+    for index, record in enumerate(records):
+        if record.split is None:
+            continue
+
+        person_groups = person_split_groups.setdefault(
+            record.person_key,
+            {}
+        )
+
+        person_groups.setdefault(record.split, []).append(index)
+
+    eligible_groups = []
+
+    for person_key, split_groups in person_split_groups.items():
+        for split, indices in split_groups.items():
+            if len(indices) >= 2:
+                eligible_groups.append(
+                    (person_key, split, indices)
+                )
+
+    if affected_count > len(eligible_groups):
+        raise ValueError(
+            "affected_count cannot exceed the number of eligible "
+            "person/split groups."
+        )
+
+    rng = random.Random(seed)
+
+    selected_groups = rng.sample(
+        eligible_groups,
+        affected_count,
+    )
+
+    corrupted = list(records)
+    operations = []
+    affected_keys = []
+
+    for person_key, original_split, indices in selected_groups:
+        source_index = rng.choice(indices)
+
+        alternative_splits = [
+            split
+            for split in available_splits
+            if split != original_split
+        ]
+
+        new_split = rng.choice(alternative_splits)
+
+        original = corrupted[source_index]
+
+        corrupted[source_index] = replace(
+            original,
+            split=new_split,
+        )
+
+        affected_keys.append(person_key)
+
+        operations.append(
+            {
+                "operation": "move_record_to_different_split",
+                "source_row_index": source_index,
+                "affected_person_key": person_key,
+                "original_split": original_split,
+                "new_split": new_split,
+            }
+        )
+
+    truth = {
+        "corruption": "C5_subject_split_leakage",
+        "seed": seed,
+        "parent_manifest_sha256": _manifest_hash(records),
+        "operations": operations,
+        "affected_keys": affected_keys,
+        "expected_violations": [
+            "I5.person_split_leakage",
+        ],
+    }
+
+    return corrupted, truth
+
 def inject_corruption(
     records: list[Any],
     *,
@@ -387,6 +590,9 @@ def inject_corruption(
     Currently implemented:
         C1_namespace_stripping
         C2_canonicalization_collision
+        C3_duplicate_propagation
+        C4_cross_modal_permutation
+        C5_subject_split_leakage
 
     The clean input is never modified in place.
     """
@@ -416,6 +622,13 @@ def inject_corruption(
 
     if corruption == "C4_cross_modal_permutation":
         return _inject_c4_cross_modal_permutation(
+            clean_records,
+            affected_count=affected_count,
+            seed=seed,
+        )
+
+    if corruption == "C5_subject_split_leakage":
+        return _inject_c5_subject_split_leakage(
             clean_records,
             affected_count=affected_count,
             seed=seed,

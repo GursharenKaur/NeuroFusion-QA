@@ -856,3 +856,252 @@ def test_c4_rejects_invalid_affected_count():
         raise AssertionError(
             "Expected ValueError for invalid affected_count."
         )
+
+def test_c5_creates_subject_split_leakage():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            session_id="ses-01",
+            modality="T1w",
+            run="01",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            session_id="ses-01",
+            modality="bold",
+            run="01",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            session_id="ses-01",
+            modality="T1w",
+            run="01",
+            split="test",
+        ),
+    ]
+
+    corrupted, truth = inject_corruption(
+        records,
+        corruption="C5_subject_split_leakage",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    assert len(corrupted) == len(records)
+    assert truth["corruption"] == "C5_subject_split_leakage"
+    assert "I5.person_split_leakage" in truth["expected_violations"]
+
+
+def test_c5_preserves_participant_identity():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="T1w",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="bold",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="T1w",
+            split="test",
+        ),
+    ]
+
+    corrupted, truth = inject_corruption(
+        records,
+        corruption="C5_subject_split_leakage",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    for original, changed in zip(records, corrupted):
+        assert original.person_key == changed.person_key
+
+    assert len(truth["affected_keys"]) == 1
+
+
+def test_c5_changes_split_assignment():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="T1w",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="bold",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="T1w",
+            split="test",
+        ),
+    ]
+
+    corrupted, truth = inject_corruption(
+        records,
+        corruption="C5_subject_split_leakage",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    changed_indices = [
+        index
+        for index, (original, changed)
+        in enumerate(zip(records, corrupted))
+        if original.split != changed.split
+    ]
+
+    assert len(changed_indices) == 1
+
+    index = changed_indices[0]
+    operation = truth["operations"][0]
+
+    assert operation["source_row_index"] == index
+    assert operation["original_split"] == records[index].split
+    assert operation["new_split"] == corrupted[index].split
+
+
+def test_c5_does_not_modify_original_records():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="T1w",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="bold",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="T1w",
+            split="test",
+        ),
+    ]
+
+    original = list(records)
+
+    inject_corruption(
+        records,
+        corruption="C5_subject_split_leakage",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    assert records == original
+
+
+def test_c5_truth_contains_required_metadata():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="T1w",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="bold",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="T1w",
+            split="test",
+        ),
+    ]
+
+    _, truth = inject_corruption(
+        records,
+        corruption="C5_subject_split_leakage",
+        affected_count=1,
+        seed=12345,
+    )
+
+    assert truth["seed"] == 12345
+    assert "parent_manifest_sha256" in truth
+    assert "operations" in truth
+    assert "affected_keys" in truth
+    assert "expected_violations" in truth
+    assert "I5.person_split_leakage" in truth["expected_violations"]
+
+
+def test_c5_is_deterministic_for_same_seed():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="T1w",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="bold",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="T1w",
+            split="test",
+        ),
+    ]
+
+    corrupted_a, truth_a = inject_corruption(
+        records,
+        corruption="C5_subject_split_leakage",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    corrupted_b, truth_b = inject_corruption(
+        records,
+        corruption="C5_subject_split_leakage",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    assert corrupted_a == corrupted_b
+    assert truth_a == truth_b
