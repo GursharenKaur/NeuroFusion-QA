@@ -704,6 +704,7 @@ def _inject_c6_denominator_mismatch(
 
     return corrupted_metrics, truth
 
+
 def inject_corruption(
     records: list[Any],
     *,

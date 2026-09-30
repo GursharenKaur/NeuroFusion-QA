@@ -1,5 +1,7 @@
 from neurofusion_qa.manifest import ManifestRecord
 from neurofusion_qa.identity import canonicalize_participant_id
+from neurofusion_qa.identity import check_i6_metric_denominator_traceability
+
 from neurofusion_qa.corruptions import inject_corruption
 
 
@@ -1427,3 +1429,66 @@ def test_c6_is_deterministic_for_same_seed():
 
     assert corrupted_a == corrupted_b
     assert truth_a == truth_b
+
+def test_c6_triggers_i6_denominator_mismatch():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-03",
+            split="train",
+        ),
+    ]
+
+    metrics = [
+        {
+            "metric_name": "accuracy",
+            "population_key": "train_population",
+            "numerator": 2,
+            "denominator": 3,
+        }
+    ]
+
+    populations = {
+        "train_population": {
+            "person_keys": [
+                record.person_key
+                for record in records
+            ]
+        }
+    }
+
+    corrupted_metrics, truth = inject_corruption(
+        records,
+        corruption="C6_denominator_mismatch",
+        affected_count=1,
+        seed=20270915,
+        metrics=metrics,
+        populations=populations,
+    )
+
+    findings = check_i6_metric_denominator_traceability(
+        records,
+        metrics=corrupted_metrics,
+        populations=populations,
+    )
+
+    rule_ids = {
+        finding.rule_id
+        for finding in findings
+    }
+
+    assert "I6.denominator_mismatch" in rule_ids
+    assert "I6.denominator_mismatch" in truth["expected_violations"]
