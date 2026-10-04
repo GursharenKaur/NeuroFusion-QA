@@ -1,4 +1,5 @@
 from __future__ import annotations
+import hashlib
 
 import json
 from dataclasses import asdict, dataclass
@@ -354,6 +355,50 @@ def _markdown_escape(value: Any) -> str:
     """Escape characters that would break the Markdown table."""
     return str(value).replace("|", "\\|").replace("\n", " ")
 
+def sha256_file(path: str | Path) -> str:
+    """Return the SHA-256 digest of one file."""
+    digest = hashlib.sha256()
+
+    with Path(path).open("rb") as file:
+        while chunk := file.read(1024 * 1024):
+            digest.update(chunk)
+
+    return digest.hexdigest()
+
+
+def sha256_source_tree(source_root: str | Path) -> str:
+    """
+    Return a deterministic SHA-256 digest of a Python source tree.
+
+    Files are ordered by relative POSIX path. Each file contributes its
+    relative path followed by its raw bytes.
+    """
+    root = Path(source_root).resolve()
+
+    if not root.is_dir():
+        raise ValueError(f"Source root does not exist: {root}")
+
+    files = sorted(
+        path
+        for path in root.rglob("*.py")
+        if path.is_file()
+    )
+
+    digest = hashlib.sha256()
+
+    for path in files:
+        relative_path = path.relative_to(root).as_posix().encode("utf-8")
+        digest.update(relative_path)
+        digest.update(b"\0")
+
+        with path.open("rb") as file:
+            while chunk := file.read(1024 * 1024):
+                digest.update(chunk)
+
+        digest.update(b"\0")
+
+    return digest.hexdigest()
+
 def audit_manifest(
     records: list[Any],
     *,
@@ -363,6 +408,9 @@ def audit_manifest(
     metrics: Iterable[dict[str, Any]] | None = None,
     populations: dict[Any, Any] | None = None,
     grouping_variables: dict[str, Any] | None = None,
+    manifest_hash: str | None = None,
+    config_hash: str | None = None,
+    code_hash: str | None = None,
 ) -> AuditReport:
     """
     Run the IdentityGuard-BIDS invariant checks over a manifest.
@@ -513,4 +561,7 @@ def audit_manifest(
 
     return AuditReport(
         findings=tuple(findings),
+        manifest_hash=manifest_hash,
+        config_hash=config_hash,
+        code_hash=code_hash,
     )

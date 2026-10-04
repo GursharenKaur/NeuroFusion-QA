@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from neurofusion_qa.cli import main
@@ -26,6 +27,13 @@ def write_manifest(path: Path, rows: list[list[str]]) -> None:
     )
 
 
+def write_config(path: Path) -> None:
+    path.write_text(
+        "protocol:\n  name: test\n",
+        encoding="utf-8",
+    )
+
+
 def test_cli_clean_manifest_returns_zero(tmp_path: Path):
     manifest = tmp_path / "manifest.tsv"
 
@@ -45,6 +53,9 @@ def test_cli_clean_manifest_returns_zero(tmp_path: Path):
         ],
     )
 
+    config = tmp_path / "config.yaml"
+    write_config(config)
+
     json_output = tmp_path / "audit.json"
     tsv_output = tmp_path / "audit.tsv"
     markdown_output = tmp_path / "audit.md"
@@ -53,6 +64,8 @@ def test_cli_clean_manifest_returns_zero(tmp_path: Path):
         [
             "audit",
             str(manifest),
+            "--config",
+            str(config),
             "--json",
             str(json_output),
             "--tsv",
@@ -66,6 +79,14 @@ def test_cli_clean_manifest_returns_zero(tmp_path: Path):
     assert json_output.exists()
     assert tsv_output.exists()
     assert markdown_output.exists()
+
+    payload = json.loads(
+        json_output.read_text(encoding="utf-8")
+    )
+
+    assert payload["provenance"]["manifest_sha256"]
+    assert payload["provenance"]["config_sha256"]
+    assert payload["provenance"]["code_hash"]
 
 
 def test_cli_audit_error_returns_one(tmp_path: Path):
@@ -97,10 +118,15 @@ def test_cli_audit_error_returns_one(tmp_path: Path):
         ],
     )
 
+    config = tmp_path / "config.yaml"
+    write_config(config)
+
     exit_code = main(
         [
             "audit",
             str(manifest),
+            "--config",
+            str(config),
             "--json",
             str(tmp_path / "audit.json"),
             "--tsv",
@@ -112,11 +138,17 @@ def test_cli_audit_error_returns_one(tmp_path: Path):
 
     assert exit_code == 1
 
+
 def test_cli_missing_manifest_returns_two(tmp_path: Path):
+    config = tmp_path / "config.yaml"
+    write_config(config)
+
     exit_code = main(
         [
             "audit",
             str(tmp_path / "does_not_exist.tsv"),
+            "--config",
+            str(config),
         ]
     )
 

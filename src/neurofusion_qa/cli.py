@@ -5,8 +5,7 @@ import sys
 from pathlib import Path
 
 from .manifest import load_manifest_tsv
-from .reporting import audit_manifest
-
+from .reporting import audit_manifest, sha256_file, sha256_source_tree
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -54,13 +53,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Markdown report path.",
     )
 
+    audit_parser.add_argument(
+        "--config",
+        dest="config",
+        type=Path,
+        default=Path("config/identityguard_protocol.yaml"),
+        help="IdentityGuard-BIDS protocol/configuration file.",
+    )
     return parser
 
 
 def run_audit(args: argparse.Namespace) -> int:
     records = load_manifest_tsv(args.manifest)
 
-    report = audit_manifest(records)
+    manifest_hash = sha256_file(args.manifest)
+    config_hash = sha256_file(args.config)
+
+    source_root = Path(__file__).resolve().parent
+    code_hash = sha256_source_tree(source_root)
+
+    report = audit_manifest(
+        records,
+        manifest_hash=manifest_hash,
+        config_hash=config_hash,
+        code_hash=code_hash,
+    )
 
     report.write_json(args.json_output)
     report.write_tsv(args.tsv_output)
