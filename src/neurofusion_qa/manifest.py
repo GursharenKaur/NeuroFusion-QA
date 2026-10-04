@@ -8,6 +8,8 @@ from bids import BIDSLayout
 import hashlib
 from datetime import datetime, timezone
 
+import csv
+
 @dataclass(frozen=True)
 class ManifestMetadata:
     """
@@ -269,3 +271,111 @@ def build_manifest_metadata(
         row_count=row_count,
         generation_time=datetime.now(timezone.utc).isoformat(),
     )
+
+def load_manifest_tsv(path: str | Path) -> list[ManifestRecord]:
+    """
+    Load an IdentityGuard-BIDS tabular manifest from TSV.
+
+    This TSV representation is an implementation convention for the
+    project. It uses the same fields as ManifestRecord and preserves
+    empty optional values as None.
+    """
+    path = Path(path)
+
+    required_columns = {
+        "dataset_namespace",
+        "dataset_version",
+        "participant_id",
+    }
+
+    optional_columns = {
+        "session_id",
+        "modality",
+        "task",
+        "acquisition",
+        "run",
+        "source_path",
+        "source_sha256",
+        "derivative_recipe_sha256",
+        "derivative_path",
+        "derivative_sha256",
+        "split",
+        "analysis_role",
+    }
+
+    with path.open("r", encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file, delimiter="\t")
+
+        if reader.fieldnames is None:
+            raise ValueError("Manifest TSV has no header.")
+
+        columns = set(reader.fieldnames)
+
+        missing = required_columns - columns
+        if missing:
+            raise ValueError(
+                "Manifest TSV is missing required columns: "
+                + ", ".join(sorted(missing))
+            )
+
+        unknown = columns - required_columns - optional_columns
+        if unknown:
+            raise ValueError(
+                "Manifest TSV contains unsupported columns: "
+                + ", ".join(sorted(unknown))
+            )
+
+        records: list[ManifestRecord] = []
+
+        for row_number, row in enumerate(reader, start=2):
+            def value(column: str) -> str | None:
+                raw = row.get(column)
+                if raw is None or raw == "":
+                    return None
+                return raw
+
+            namespace = value("dataset_namespace")
+            version = value("dataset_version")
+            participant = value("participant_id")
+
+            if namespace is None:
+                raise ValueError(
+                    f"Manifest row {row_number} has an empty "
+                    "dataset_namespace."
+                )
+
+            if version is None:
+                raise ValueError(
+                    f"Manifest row {row_number} has an empty "
+                    "dataset_version."
+                )
+
+            if participant is None:
+                raise ValueError(
+                    f"Manifest row {row_number} has an empty "
+                    "participant_id."
+                )
+
+            records.append(
+                ManifestRecord(
+                    dataset_namespace=namespace,
+                    dataset_version=version,
+                    participant_id=participant,
+                    session_id=value("session_id"),
+                    modality=value("modality"),
+                    task=value("task"),
+                    acquisition=value("acquisition"),
+                    run=value("run"),
+                    source_path=value("source_path"),
+                    source_sha256=value("source_sha256"),
+                    derivative_recipe_sha256=value(
+                        "derivative_recipe_sha256"
+                    ),
+                    derivative_path=value("derivative_path"),
+                    derivative_sha256=value("derivative_sha256"),
+                    split=value("split"),
+                    analysis_role=value("analysis_role"),
+                )
+            )
+
+    return records

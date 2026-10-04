@@ -449,3 +449,43 @@ def test_audit_manifest_runs_i6_when_metrics_and_populations_are_supplied():
         finding.rule_id.startswith("I6.")
         for finding in report.findings
     )
+
+def test_load_manifest_tsv(tmp_path: Path):
+    from neurofusion_qa.manifest import load_manifest_tsv
+
+    manifest = tmp_path / "manifest.tsv"
+
+    manifest.write_text(
+        "\t".join(
+            [
+                "dataset_namespace",
+                "dataset_version",
+                "participant_id",
+                "session_id",
+                "modality",
+                "source_path",
+            ]
+        )
+        + "\n"
+        + "\t".join(
+            [
+                "test",
+                "1.0",
+                "sub-01",
+                "ses-01",
+                "T1w",
+                "sub-01_T1w.nii.gz",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    records = load_manifest_tsv(manifest)
+
+    assert len(records) == 1
+    assert records[0].dataset_namespace == "test"
+    assert records[0].participant_id == "sub-01"
+    assert records[0].session_id == "ses-01"
+    assert records[0].modality == "T1w"
+    assert records[0].source_path == "sub-01_T1w.nii.gz"
