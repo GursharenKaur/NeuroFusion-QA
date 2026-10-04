@@ -1,0 +1,2 @@
+[console_scripts]
+identityguard = neurofusion_qa.cli:main

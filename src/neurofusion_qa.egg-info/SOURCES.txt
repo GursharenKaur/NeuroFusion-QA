@@ -6,9 +6,11 @@ src/neurofusion_qa/identity.py
 src/neurofusion_qa/lineage.py
 src/neurofusion_qa/manifest.py
 src/neurofusion_qa/reporting.py
+src/neurofusion_qa/split.py
 src/neurofusion_qa.egg-info/PKG-INFO
 src/neurofusion_qa.egg-info/SOURCES.txt
 src/neurofusion_qa.egg-info/dependency_links.txt
+src/neurofusion_qa.egg-info/entry_points.txt
 src/neurofusion_qa.egg-info/requires.txt
 src/neurofusion_qa.egg-info/top_level.txt
 tests/test_corruptions.py
@@ -16,3 +18,4 @@ tests/test_identity.py
 tests/test_lineage.py
 tests/test_manifest.py
 tests/test_reporting.py
+tests/test_split.py
