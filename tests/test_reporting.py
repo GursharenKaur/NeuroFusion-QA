@@ -286,3 +286,166 @@ def test_markdown_escapes_table_pipes():
     markdown = report.to_markdown()
 
     assert "A \\| B" in markdown
+
+from neurofusion_qa.manifest import ManifestRecord
+from neurofusion_qa.reporting import audit_manifest
+
+def make_clean_record(
+    participant_id: str = "sub-01",
+    *,
+    modality: str = "T1w",
+    split: str | None = "train",
+) -> ManifestRecord:
+    return ManifestRecord(
+        dataset_namespace="test",
+        dataset_version="1.0",
+        participant_id=participant_id,
+        session_id="ses-01",
+        modality=modality,
+        source_path=f"{participant_id}_{modality}.nii.gz",
+        source_sha256=f"hash-{participant_id}-{modality}",
+        split=split,
+    )
+
+
+def test_audit_manifest_runs_manifest_based_invariants():
+    records = [
+        make_clean_record("sub-01", modality="T1w"),
+        make_clean_record("sub-01", modality="bold"),
+    ]
+
+    report = audit_manifest(records)
+
+    assert isinstance(report, AuditReport)
+    assert report.total_findings == 0
+
+
+def test_audit_manifest_reports_i1_failure():
+    records = [
+        ManifestRecord(
+            dataset_namespace="",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            source_path="sub-01_T1w.nii.gz",
+        )
+    ]
+
+    report = audit_manifest(records)
+
+    assert report.has_errors
+    assert any(
+        finding.rule_id == "I1.namespace_completeness"
+        for finding in report.findings
+    )
+
+
+def test_audit_manifest_requires_both_i6_inputs():
+    records = [
+        make_clean_record()
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="I6 requires both metrics and populations",
+    ):
+        audit_manifest(
+            records,
+            metrics=[],
+        )
+
+
+def test_audit_manifest_does_not_infer_i2_i3_or_i6():
+    records = [
+        make_clean_record("sub-01", modality="T1w"),
+        make_clean_record("sub-02", modality="bold"),
+    ]
+
+    report = audit_manifest(records)
+
+    rule_ids = {
+        finding.rule_id
+        for finding in report.findings
+    }
+
+    assert not any(rule_id.startswith("I2.") for rule_id in rule_ids)
+    assert not any(rule_id.startswith("I3.") for rule_id in rule_ids)
+    assert not any(rule_id.startswith("I6.") for rule_id in rule_ids)
+
+def test_audit_manifest_runs_i2_when_join_check_is_supplied():
+    records = [
+        make_clean_record("sub-01"),
+    ]
+
+    report = audit_manifest(
+        records,
+        join_checks=[
+            {
+                "left_counts": {
+                    ("test", "1.0", "sub-01"): 2,
+                },
+                "right_counts": {
+                    ("test", "1.0", "sub-01"): 1,
+                },
+                "relation": "one_to_one",
+            }
+        ],
+    )
+
+    assert any(
+        finding.rule_id == "I2.cardinality_mismatch"
+        for finding in report.findings
+    )
+
+def test_audit_manifest_runs_i3_when_pairs_are_supplied():
+    left = make_clean_record(
+        "sub-01",
+        modality="T1w",
+    )
+
+    right = make_clean_record(
+        "sub-02",
+        modality="bold",
+    )
+
+    report = audit_manifest(
+        [left, right],
+        cross_modal_pairs=[
+            (left, right),
+        ],
+    )
+
+    assert any(
+        finding.rule_id == "I3.person_pairing"
+        for finding in report.findings
+    )
+
+def test_audit_manifest_runs_i6_when_metrics_and_populations_are_supplied():
+    record = make_clean_record("sub-01")
+
+    population_key = "test_population"
+
+    population = {
+        population_key: {
+            record.person_key,
+        }
+    }
+
+    metrics = [
+        {
+            "metric_id": "accuracy",
+            "population_key": population_key,
+            "numerator": 1,
+            "denominator": 1,
+        }
+    ]
+
+    report = audit_manifest(
+        [record],
+        metrics=metrics,
+        populations=population,
+    )
+
+    assert not any(
+        finding.rule_id.startswith("I6.")
+        for finding in report.findings
+    )

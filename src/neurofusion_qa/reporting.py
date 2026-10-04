@@ -6,8 +6,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from .identity import Finding
-
+from .identity import (
+    Finding,
+    check_i1_acquisition_key_injectivity,
+    check_i1_canonicalization_collision,
+    check_i1_namespace_completeness,
+    check_i2_join_cardinality,
+    check_i3_cross_modal_pairing,
+    check_i5_split_independence,
+    check_i6_metric_denominator_traceability,
+)
+from .lineage import (
+    check_i4_derivative_lineage,
+    check_i4_identical_derivative_hashes_under_different_keys,
+    check_i4_identical_source_hashes_under_different_keys,
+    check_i4_repeated_paths_or_rows,
+)
 
 @dataclass(frozen=True)
 class AuditReport:
@@ -339,3 +353,164 @@ def _tsv_escape(value: Any) -> str:
 def _markdown_escape(value: Any) -> str:
     """Escape characters that would break the Markdown table."""
     return str(value).replace("|", "\\|").replace("\n", " ")
+
+def audit_manifest(
+    records: list[Any],
+    *,
+    join_checks: Iterable[dict[str, Any]] | None = None,
+    cross_modal_pairs: Iterable[Any] | None = None,
+    crosswalk: Any | None = None,
+    metrics: Iterable[dict[str, Any]] | None = None,
+    populations: dict[Any, Any] | None = None,
+    grouping_variables: dict[str, Any] | None = None,
+) -> AuditReport:
+    """
+    Run the IdentityGuard-BIDS invariant checks over a manifest.
+
+    The manifest itself is sufficient for the checks whose evidence is
+    represented directly by ManifestRecord fields:
+
+        I1, I4, I5
+
+    Supplemental inputs are required for invariants whose evidence is
+    represented outside the base manifest:
+
+        I2 -> join_checks
+        I3 -> cross_modal_pairs
+        I6 -> metrics + populations
+
+    This explicit-input convention is intentional. The current research
+    protocol does not define a concrete serialized schema for these
+    supplemental relation/analysis tables, so the audit engine does not
+    invent one or infer missing evidence from ordinary manifest rows.
+
+    Parameters
+    ----------
+    records:
+        Manifest records to audit.
+
+    join_checks:
+        Explicit join-cardinality specifications for I2.
+
+    cross_modal_pairs:
+        Explicit cross-modal pair records for I3.
+
+    crosswalk:
+        Optional authoritative crosswalk passed directly to I3.
+
+    metrics:
+        Explicit analysis metrics for I6.
+
+    populations:
+        Explicit metric populations for I6.
+
+    grouping_variables:
+        Optional grouping-variable mapping used by the existing I5
+        implementation.
+    """
+    findings: list[Finding] = []
+
+    # ---------------------------------------------------------
+    # I1 — Identity completeness / injectivity
+    # ---------------------------------------------------------
+
+    findings.extend(
+        check_i1_namespace_completeness(records)
+    )
+
+    findings.extend(
+        check_i1_acquisition_key_injectivity(records)
+    )
+
+    findings.extend(
+        check_i1_canonicalization_collision(records)
+    )
+
+    # ---------------------------------------------------------
+    # I2 — Join cardinality
+    #
+    # Only evaluate when an explicit relation specification has
+    # been supplied. Do not infer a join relationship from rows.
+    # ---------------------------------------------------------
+
+    if join_checks is not None:
+        for join_check in join_checks:
+            findings.extend(
+                check_i2_join_cardinality(**join_check)
+            )
+
+    # ---------------------------------------------------------
+    # I3 — Cross-modal pairing
+    #
+    # Pairing evidence must be explicit. No string-similarity
+    # or row-order inference is performed here.
+    # ---------------------------------------------------------
+
+    if cross_modal_pairs is not None:
+        findings.extend(
+            check_i3_cross_modal_pairing(
+                cross_modal_pairs,
+                crosswalk=crosswalk,
+            )
+        )
+
+    # ---------------------------------------------------------
+    # I4 — Derivative lineage / duplication
+    # ---------------------------------------------------------
+
+    findings.extend(
+        check_i4_identical_source_hashes_under_different_keys(
+            records
+        )
+    )
+
+    findings.extend(
+        check_i4_identical_derivative_hashes_under_different_keys(
+            records
+        )
+    )
+
+    findings.extend(
+        check_i4_repeated_paths_or_rows(records)
+    )
+
+    findings.extend(
+        check_i4_derivative_lineage(records)
+    )
+
+    # ---------------------------------------------------------
+    # I5 — Split independence
+    # ---------------------------------------------------------
+
+    findings.extend(
+        check_i5_split_independence(
+            records,
+            grouping_variables=grouping_variables,
+        )
+    )
+
+    # ---------------------------------------------------------
+    # I6 — Metric denominator traceability
+    #
+    # Both metrics and populations are required because neither
+    # alone provides enough evidence to audit denominator
+    # traceability.
+    # ---------------------------------------------------------
+
+    if metrics is not None or populations is not None:
+        if metrics is None or populations is None:
+            raise ValueError(
+                "I6 requires both metrics and populations."
+            )
+
+        findings.extend(
+            check_i6_metric_denominator_traceability(
+                records,
+                metrics,
+                populations,
+            )
+        )
+
+    return AuditReport(
+        findings=tuple(findings),
+    )
