@@ -489,3 +489,30 @@ protocol requirement.
 For each corruption experiment, the corrupted manifest is supplied to the
 detector while corruption truth is retained separately by the benchmark
 evaluator. The detector must not receive the hidden corruption truth.
+
+### Benchmark Localization and Failure-Type Evaluation
+
+The corruption truth records affected keys from the clean parent manifest.
+Some corruptions intentionally modify identity-bearing fields, so the affected
+key in hidden truth may differ from the key observed by the detector after
+corruption.
+
+For benchmark localization, the corruption operation's row-level evidence is
+used to establish correspondence between the clean affected record and the
+detector's observed record when an identity-bearing field has been modified.
+Literal equality between the clean affected key and the detector-observed key
+is therefore not required for such corruptions.
+
+For corruptions whose identity-bearing fields are unchanged, detector
+localization is evaluated by direct affected-key correspondence.
+
+Failure-type accuracy is evaluated against the corruption generator's
+`expected_violations`. Secondary findings produced as downstream consequences
+of a corruption are not treated as additional expected failure types.
+
+A corruption is classified as correctly identified only when all of its
+declared expected violation rules are detected by the benchmark detector.
+
+These localization and failure-type evaluation rules are implementation
+conventions for the synthetic benchmark. They are not additional requirements
+of the research protocol.
