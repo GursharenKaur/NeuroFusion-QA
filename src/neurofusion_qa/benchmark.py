@@ -4,7 +4,10 @@ import hashlib
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from .identity import Finding
+from .identity import (
+    Finding,
+    canonicalize_participant_id,
+)
 from .manifest import ManifestRecord
 
 SYNTHETIC_NAMESPACE = "synthetic:identityguard"
@@ -309,3 +312,65 @@ def build_synthetic_cross_modal_pairs(
                     )
 
     return pairs
+
+def build_synthetic_cross_modal_join_check(
+    records: Iterable[ManifestRecord],
+) -> dict[str, Any]:
+    """
+    Build explicit one-to-one cross-modal join evidence for the synthetic
+    benchmark.
+
+    The synthetic benchmark uses the first two modality labels as the two
+    sides of the declared relation. Join keys are namespace-qualified
+    canonical participant identity plus session/acquisition/run context.
+
+    This is supplemental benchmark evidence supplied to I2. It is not
+    hidden corruption truth and does not infer cross-dataset identity.
+    """
+    records = list(records)
+
+    modalities = sorted(
+        {
+            record.modality
+            for record in records
+            if record.modality is not None
+        }
+    )
+
+    if len(modalities) != 2:
+        raise ValueError(
+            "Synthetic cross-modal I2 join requires exactly two modalities."
+        )
+
+    left_modality, right_modality = modalities
+
+    def counts_for_modality(
+        modality: str,
+    ) -> dict[Any, int]:
+        counts: dict[Any, int] = {}
+
+        for record in records:
+            if record.modality != modality:
+                continue
+
+            join_key = (
+                record.dataset_namespace,
+                record.dataset_version,
+                canonicalize_participant_id(
+                    record.participant_id
+                ),
+                record.session_id,
+                record.task,
+                record.acquisition,
+                record.run,
+            )
+
+            counts[join_key] = counts.get(join_key, 0) + 1
+
+        return counts
+
+    return {
+        "left_counts": counts_for_modality(left_modality),
+        "right_counts": counts_for_modality(right_modality),
+        "relation": "one_to_one",
+    }

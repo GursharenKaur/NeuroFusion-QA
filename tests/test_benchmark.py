@@ -1,8 +1,12 @@
 from neurofusion_qa.benchmark import (
-    build_synthetic_manifest,
+    build_synthetic_cross_modal_join_check,
     build_synthetic_cross_modal_pairs,
+    build_synthetic_manifest,
     evaluate_benchmark_findings,
 )
+
+from neurofusion_qa.corruptions import inject_corruption
+from neurofusion_qa.reporting import audit_manifest
 
 def test_synthetic_manifest_record_count():
     records = build_synthetic_manifest(
@@ -309,3 +313,74 @@ def test_benchmark_evaluation_localizes_identity_changing_corruption():
     assert evaluation.localization_true_positives == 1
     assert evaluation.localization_false_positives == 0
     assert evaluation.failure_type_correct is True
+
+def test_synthetic_cross_modal_join_check_is_one_to_one():
+    records = build_synthetic_manifest(
+        people=4,
+        modalities=2,
+        sessions=2,
+        runs_per_modality=4,
+    )
+
+    join_check = build_synthetic_cross_modal_join_check(records)
+
+    assert join_check["relation"] == "one_to_one"
+    assert set(join_check["left_counts"]) == set(
+        join_check["right_counts"]
+    )
+    assert set(join_check["left_counts"].values()) == {1}
+    assert set(join_check["right_counts"].values()) == {1}
+
+def test_c2_produces_declared_i2_cardinality_violation():
+    records = build_synthetic_manifest(
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+    )
+
+    corrupted, truth = inject_corruption(
+        records,
+        corruption="C2_canonicalization_collision",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    join_check = build_synthetic_cross_modal_join_check(corrupted)
+
+    report = audit_manifest(
+        corrupted,
+        join_checks=[join_check],
+    )
+
+    rule_ids = {
+        finding.rule_id
+        for finding in report.findings
+    }
+
+    assert "I1.canonicalization_collision" in rule_ids
+    assert "I2.cardinality_mismatch" in rule_ids
+
+    # Downstream unmatched-key evidence is allowed, but it is not
+    # part of C2's declared expected violation set.
+    assert set(truth["expected_violations"]) == {
+        "I1.canonicalization_collision",
+        "I2.cardinality_mismatch",
+    }
+
+    assert "I2.many_to_many" not in rule_ids
+
+def test_synthetic_cross_modal_join_check_supports_full_grid():
+    records = build_synthetic_manifest(
+        people=16,
+        modalities=2,
+        sessions=2,
+        runs_per_modality=4,
+    )
+
+    join_check = build_synthetic_cross_modal_join_check(records)
+
+    assert len(join_check["left_counts"]) == 128
+    assert len(join_check["right_counts"]) == 128
+    assert set(join_check["left_counts"].values()) == {1}
+    assert set(join_check["right_counts"].values()) == {1}

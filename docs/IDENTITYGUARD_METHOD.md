@@ -516,3 +516,34 @@ declared expected violation rules are detected by the benchmark detector.
 These localization and failure-type evaluation rules are implementation
 conventions for the synthetic benchmark. They are not additional requirements
 of the research protocol.
+
+### Synthetic C2 Cross-Modal Join Convention
+
+For the synthetic C2 benchmark, I2 is evaluated using an explicit
+one-to-one relation between the first two synthetic modality labels.
+
+The join key is:
+
+- `dataset_namespace`
+- `dataset_version`
+- canonicalized `participant_id`
+- `session_id`
+- `task`
+- `acquisition`
+- `run`
+
+This preserves one join unit per participant/session/acquisition/run on each
+modality even when the synthetic benchmark varies the number of sessions or
+runs.
+
+The relation is supplied explicitly to the audit engine through the existing
+`join_checks` interface. The audit engine does not infer this relation from
+ordinary manifest rows.
+
+C2 is expected to produce `I2.cardinality_mismatch` under this relation.
+`I2.unmatched_keys` may also occur as a downstream consequence when the
+corrupted participant label no longer matches its original cross-modal
+counterpart; it is not included in C2's declared expected violation set.
+
+This is an implementation convention for the synthetic benchmark and is not
+an additional requirement of the research protocol.
