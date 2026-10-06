@@ -439,3 +439,53 @@ The C6 generator has additionally been verified end-to-end against the
 
 No benchmark summary results are represented by these tests; benchmark
 evaluation remains a separate stage.
+
+## Synthetic Benchmark Implementation Conventions
+
+The research protocol specifies the synthetic benchmark grid, corruption
+types, severity levels, and repetition requirements, but does not prescribe
+the concrete serialization of synthetic manifest fields. The following
+conventions are therefore implementation choices for the IdentityGuard-BIDS
+benchmark and are not additional protocol requirements.
+
+### Synthetic Dataset Identity
+
+- `dataset_namespace`: `synthetic:identityguard`
+- `dataset_version`: `1.0`
+- `participant_id`: `sub-00001`, `sub-00002`, ...
+- Synthetic identifiers are generated solely for benchmark purposes and are
+  not derived from private or protected datasets.
+
+### Synthetic Acquisition Representation
+
+Synthetic records use the existing `ManifestRecord` fields:
+
+- `session_id`: `ses-01`, `ses-02`, ...
+- `modality`: `mod-01`, `mod-02`, ...
+- `task`: `task-synthetic`
+- `acquisition`: `acq-01`
+- `run`: `01`, `02`, ...
+- `analysis_role`: `primary`
+
+### Synthetic Provenance
+
+Synthetic source and derivative paths and hashes are generated
+deterministically from the synthetic record identity. They do not represent
+real imaging files.
+
+### Synthetic Split Assignment
+
+The protocol requires subject-level split independence but does not prescribe
+specific split proportions. For benchmark generation, participants are
+deterministically assigned to the existing `train`, `validation`, and `test`
+split labels, and all records belonging to a participant inherit that
+participant's split.
+
+This split assignment is an implementation convention rather than a
+protocol requirement.
+
+### Benchmark Truth Separation
+
+For each corruption experiment, the corrupted manifest is supplied to the
+detector while corruption truth is retained separately by the benchmark
+evaluator. The detector must not receive the hidden corruption truth.
