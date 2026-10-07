@@ -4,6 +4,7 @@ from neurofusion_qa.benchmark import (
     build_synthetic_manifest,
     evaluate_benchmark_findings,
     build_synthetic_metric_evidence,
+    build_synthetic_cross_modal_pairs_from_clean,
 )
 
 from neurofusion_qa.corruptions import inject_corruption
@@ -477,6 +478,47 @@ def test_c3_produces_i2_i4_and_i6_benchmark_findings():
     assert "I4.repeated_row" in rule_ids
     assert "I4.repeated_source_path" in rule_ids
     assert "I6.denominator_mismatch" in rule_ids
+
+    evaluation = evaluate_benchmark_findings(
+        report.findings,
+        truth,
+    )
+
+    assert evaluation.detected is True
+    assert evaluation.expected_violation_detected is True
+    assert evaluation.failure_type_correct is True
+
+def test_c4_produces_i3_person_pairing_finding():
+    clean_records = build_synthetic_manifest(
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+    )
+
+    corrupted_records, truth = inject_corruption(
+        clean_records,
+        corruption="C4_cross_modal_permutation",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    cross_modal_pairs = build_synthetic_cross_modal_pairs_from_clean(
+        clean_records,
+        corrupted_records,
+    )
+
+    report = audit_manifest(
+        corrupted_records,
+        cross_modal_pairs=cross_modal_pairs,
+    )
+
+    rule_ids = {
+        finding.rule_id
+        for finding in report.findings
+    }
+
+    assert "I3.person_pairing" in rule_ids
 
     evaluation = evaluate_benchmark_findings(
         report.findings,

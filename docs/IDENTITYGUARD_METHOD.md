@@ -573,3 +573,23 @@ the detector.
 
 This is an implementation convention for the synthetic benchmark and is
 not an additional requirement of the research protocol.
+
+### C4 Synthetic Pairing-Evidence Convention
+
+The synthetic C4 benchmark requires explicit cross-modal pairing evidence
+that represents the intended clean relationship.
+
+Because C4 changes a participant identifier in the corrupted manifest, pairing
+evidence constructed directly from corrupted participant identifiers could
+reconstruct the corrupted relationship and conceal the intended I3 violation.
+
+Therefore, the synthetic benchmark constructs pairing relationships from the
+clean synthetic manifest and then retrieves the corresponding records from the
+corrupted manifest by stable row position.
+
+The clean manifest is used only to establish the intended synthetic pairing
+relationship. The audit engine receives only the resulting explicit corrupted
+record pairs and does not receive hidden corruption truth.
+
+This is an implementation convention for the synthetic benchmark and is not
+an additional requirement of the research protocol.

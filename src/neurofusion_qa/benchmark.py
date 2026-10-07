@@ -347,6 +347,77 @@ def build_synthetic_cross_modal_pairs(
 
     return pairs
 
+def build_synthetic_cross_modal_pairs_from_clean(
+    clean_records: Iterable[ManifestRecord],
+    corrupted_records: Iterable[ManifestRecord],
+) -> list[tuple[ManifestRecord, ManifestRecord]]:
+    """
+    Build explicit synthetic cross-modal pairing evidence using the clean
+    synthetic manifest as the pairing reference.
+
+    The clean manifest defines the intended participant/session/task/modality
+    relationships. The corresponding records are then retrieved from the
+    corrupted manifest by stable row position.
+
+    This preserves the intended pairing relationship while allowing C4
+    identity-changing corruption to be detected by I3.
+
+    The clean manifest is benchmark construction evidence, not hidden
+    corruption truth supplied to the audit engine.
+    """
+    clean_records = list(clean_records)
+    corrupted_records = list(corrupted_records)
+
+    if len(clean_records) != len(corrupted_records):
+        raise ValueError(
+            "Clean and corrupted manifests must contain the same number "
+            "of records."
+        )
+
+    grouped: dict[tuple[Any, Any, Any], dict[Any, list[int]]] = {}
+
+    for index, record in enumerate(clean_records):
+        key = (
+            record.participant_id,
+            record.session_id,
+            record.task,
+        )
+        grouped.setdefault(key, {}).setdefault(
+            record.modality, []
+        ).append(index)
+
+    pairs: list[tuple[ManifestRecord, ManifestRecord]] = []
+
+    for modality_groups in grouped.values():
+        modalities = sorted(
+            modality
+            for modality in modality_groups
+            if modality is not None
+        )
+
+        for index, left_modality in enumerate(modalities):
+            for right_modality in modalities[index + 1:]:
+                left_indices = modality_groups[left_modality]
+                right_indices = modality_groups[right_modality]
+
+                pair_count = min(
+                    len(left_indices),
+                    len(right_indices),
+                )
+
+                for pair_index in range(pair_count):
+                    left_index = left_indices[pair_index]
+                    right_index = right_indices[pair_index]
+
+                    pairs.append(
+                        (
+                            corrupted_records[left_index],
+                            corrupted_records[right_index],
+                        )
+                    )
+
+    return pairs
+
 def build_synthetic_cross_modal_join_check(
     records: Iterable[ManifestRecord],
 ) -> dict[str, Any]:
