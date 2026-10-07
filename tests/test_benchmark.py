@@ -528,3 +528,38 @@ def test_c4_produces_i3_person_pairing_finding():
     assert evaluation.detected is True
     assert evaluation.expected_violation_detected is True
     assert evaluation.failure_type_correct is True
+
+def test_c5_produces_i5_person_split_leakage_finding():
+    clean_records = build_synthetic_manifest(
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+    )
+
+    corrupted_records, truth = inject_corruption(
+        clean_records,
+        corruption="C5_subject_split_leakage",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    report = audit_manifest(
+        corrupted_records,
+    )
+
+    rule_ids = {
+        finding.rule_id
+        for finding in report.findings
+    }
+
+    assert "I5.person_split_leakage" in rule_ids
+
+    evaluation = evaluate_benchmark_findings(
+        report.findings,
+        truth,
+    )
+
+    assert evaluation.detected is True
+    assert evaluation.expected_violation_detected is True
+    assert evaluation.failure_type_correct is True
