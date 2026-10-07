@@ -563,3 +563,46 @@ def test_c5_produces_i5_person_split_leakage_finding():
     assert evaluation.detected is True
     assert evaluation.expected_violation_detected is True
     assert evaluation.failure_type_correct is True
+
+def test_c6_produces_i6_denominator_mismatch_finding():
+    clean_records = build_synthetic_manifest(
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+    )
+
+    clean_metrics, populations = build_synthetic_metric_evidence(
+        clean_records,
+    )
+
+    corrupted_metrics, truth = inject_corruption(
+        clean_records,
+        corruption="C6_denominator_mismatch",
+        affected_count=1,
+        seed=20270915,
+        metrics=clean_metrics,
+        populations=populations,
+    )
+
+    report = audit_manifest(
+        clean_records,
+        metrics=corrupted_metrics,
+        populations=populations,
+    )
+
+    rule_ids = {
+        finding.rule_id
+        for finding in report.findings
+    }
+
+    assert "I6.denominator_mismatch" in rule_ids
+
+    evaluation = evaluate_benchmark_findings(
+        report.findings,
+        truth,
+    )
+
+    assert evaluation.detected is True
+    assert evaluation.expected_violation_detected is True
+    assert evaluation.failure_type_correct is True

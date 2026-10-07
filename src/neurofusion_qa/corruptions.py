@@ -379,12 +379,10 @@ def _inject_c6_denominator_mismatch(
         if not population_key:
             continue
 
-        population = populations.get(population_key)
+        person_keys = populations.get(population_key)
 
-        if population is None:
+        if person_keys is None:
             continue
-
-        person_keys = population.get("person_keys", [])
 
         if not person_keys:
             continue
@@ -423,9 +421,8 @@ def _inject_c6_denominator_mismatch(
         original = metrics[index]
 
         population_key = original["population_key"]
-        population = populations[population_key]
+        person_keys = populations[population_key]
 
-        person_keys = population["person_keys"]
         actual_denominator = len(set(person_keys))
         original_denominator = original.get("denominator")
 
