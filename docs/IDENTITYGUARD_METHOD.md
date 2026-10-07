@@ -547,3 +547,29 @@ counterpart; it is not included in C2's declared expected violation set.
 
 This is an implementation convention for the synthetic benchmark and is not
 an additional requirement of the research protocol.
+
+### C3 Downstream Metric-Denominator Convention
+
+The research protocol identifies C3 duplicate propagation as affecting I6,
+but does not prescribe a concrete serialized representation for downstream
+metric populations and denominators.
+
+For the synthetic benchmark, I6 is therefore exercised using explicit
+supplemental metric evidence.
+
+The audited population is the set of unique namespace-qualified person keys
+present in the corrupted manifest. The clean metric denominator equals the
+number of unique persons in that population.
+
+For a C3 duplicate-propagation experiment, the benchmark represents the
+downstream propagated analysis-unit count by increasing the metric
+denominator by the number of duplicated analysis units. This produces an
+explicit denominator mismatch against the unique-person population used by
+the I6 audit.
+
+The metric and population evidence are supplied to the audit engine as
+ordinary supplemental inputs. Hidden corruption truth is not supplied to
+the detector.
+
+This is an implementation convention for the synthetic benchmark and is
+not an additional requirement of the research protocol.

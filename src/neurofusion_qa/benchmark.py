@@ -408,3 +408,61 @@ def build_synthetic_cross_modal_join_check(
         "right_counts": counts_for_modality(right_modality),
         "relation": "one_to_one",
     }
+
+def build_synthetic_metric_evidence(
+    records: Iterable[ManifestRecord],
+    *,
+    denominator_override: int | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, list[tuple[Any, ...]]]]:
+    """
+    Build explicit synthetic metric/population evidence for I6.
+
+    Implementation convention:
+    - The audited population is defined by unique namespace-qualified
+      person keys.
+    - Each metric explicitly declares that population.
+    - The default denominator is the unique person count.
+    - An explicit denominator_override can represent downstream
+      metric-denominator propagation in a corruption benchmark.
+
+    This is benchmark evidence supplied to the audit engine. It is not
+    hidden corruption truth and is not an additional research-protocol
+    requirement.
+    """
+    records = list(records)
+
+    population = sorted(
+        {
+            record.person_key
+            for record in records
+            if (
+                record.person_key[0] is not None
+                and record.person_key[1] is not None
+                and record.person_key[2]
+            )
+        }
+    )
+
+    population_key = "synthetic_population_v1"
+
+    populations = {
+        population_key: population,
+    }
+
+    denominator = (
+        len(population)
+        if denominator_override is None
+        else denominator_override
+    )
+
+    metrics = [
+        {
+            "metric_name": "synthetic_accuracy",
+            "split": "all",
+            "numerator": denominator,
+            "denominator": denominator,
+            "population_key": population_key,
+        }
+    ]
+
+    return metrics, populations

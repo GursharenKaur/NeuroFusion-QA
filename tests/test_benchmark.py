@@ -3,6 +3,7 @@ from neurofusion_qa.benchmark import (
     build_synthetic_cross_modal_pairs,
     build_synthetic_manifest,
     evaluate_benchmark_findings,
+    build_synthetic_metric_evidence,
 )
 
 from neurofusion_qa.corruptions import inject_corruption
@@ -430,3 +431,58 @@ def test_c2_benchmark_localization_uses_target_row():
     assert evaluation.failure_type_correct is True
 
     assert evaluation.localization_true_positives >= 1
+
+def test_c3_produces_i2_i4_and_i6_benchmark_findings():
+    clean_records = build_synthetic_manifest(
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+    )
+
+    corrupted_records, truth = inject_corruption(
+        clean_records,
+        corruption="C3_duplicate_propagation",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    join_check = build_synthetic_cross_modal_join_check(
+        corrupted_records
+    )
+
+    clean_population = {
+        record.person_key
+        for record in clean_records
+    }
+
+    metrics, populations = build_synthetic_metric_evidence(
+        corrupted_records,
+        denominator_override=len(clean_population) + 1,
+    )
+
+    report = audit_manifest(
+        corrupted_records,
+        join_checks=[join_check],
+        metrics=metrics,
+        populations=populations,
+    )
+
+    rule_ids = {
+        finding.rule_id
+        for finding in report.findings
+    }
+
+    assert "I2.cardinality_mismatch" in rule_ids
+    assert "I4.repeated_row" in rule_ids
+    assert "I4.repeated_source_path" in rule_ids
+    assert "I6.denominator_mismatch" in rule_ids
+
+    evaluation = evaluate_benchmark_findings(
+        report.findings,
+        truth,
+    )
+
+    assert evaluation.detected is True
+    assert evaluation.expected_violation_detected is True
+    assert evaluation.failure_type_correct is True
