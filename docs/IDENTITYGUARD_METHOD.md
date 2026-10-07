@@ -424,21 +424,23 @@ All C1–C6 generators preserve the clean input and emit hidden truth containing
 the parent manifest hash, seed, operations, affected keys, and expected
 violations.
 
-## Implementation Status at Pre-CLI Checkpoint
+## Implementation Status at C1–C6 Checkpoint
 
 All invariant families I1–I6 and corruption generators C1–C6 have been
 implemented and covered by automated tests.
 
 Current verification checkpoint:
 
-- `tests/test_corruptions.py`: 37 passed
-- Full test suite: 104 passed
+- C6 corruption tests: 7 passed
+- Synthetic benchmark tests: 19 passed
+- Full test suite: 147 passed
 
-The C6 generator has additionally been verified end-to-end against the
-`I6.denominator_mismatch` detector.
+The C1–C6 benchmark tests verify detection of the declared primary
+violations and benchmark evaluation of expected failure types.
 
-No benchmark summary results are represented by these tests; benchmark
-evaluation remains a separate stage.
+No benchmark summary results are represented by these automated tests;
+factorial benchmark execution and aggregate performance reporting remain a
+separate experimental stage.
 
 ## Synthetic Benchmark Implementation Conventions
 
@@ -590,6 +592,30 @@ corrupted manifest by stable row position.
 The clean manifest is used only to establish the intended synthetic pairing
 relationship. The audit engine receives only the resulting explicit corrupted
 record pairs and does not receive hidden corruption truth.
+
+This is an implementation convention for the synthetic benchmark and is not
+an additional requirement of the research protocol.
+
+### C6 Synthetic Denominator-Mismatch Convention
+
+The synthetic C6 benchmark uses explicit metric and population evidence.
+
+The population is represented by a `population_key` whose value is the
+list of unique namespace-qualified person keys. Each metric explicitly
+references that population through `population_key` and declares its
+numerator and denominator.
+
+For the clean synthetic case, the denominator equals the number of unique
+person keys in the declared population.
+
+C6 selects a traceable metric and changes only its declared denominator.
+Population membership, numerator, metric identity, and population key remain
+unchanged. The audit engine therefore detects the mismatch through
+`I6.denominator_mismatch`.
+
+The corruption generator receives the same explicit population evidence used
+by the I6 audit. Hidden corruption truth is retained separately and is not
+supplied to the detector.
 
 This is an implementation convention for the synthetic benchmark and is not
 an additional requirement of the research protocol.
