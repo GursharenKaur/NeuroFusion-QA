@@ -384,3 +384,49 @@ def test_synthetic_cross_modal_join_check_supports_full_grid():
     assert len(join_check["right_counts"]) == 128
     assert set(join_check["left_counts"].values()) == {1}
     assert set(join_check["right_counts"].values()) == {1}
+
+def test_c2_benchmark_localization_uses_target_row():
+    clean_records = build_synthetic_manifest(
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+    )
+
+    corrupted_records, truth = inject_corruption(
+        clean_records,
+        corruption="C2_canonicalization_collision",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    join_check = build_synthetic_cross_modal_join_check(
+        corrupted_records,
+    )
+
+    report = audit_manifest(
+        corrupted_records,
+        join_checks=[join_check],
+    )
+
+    evaluation = evaluate_benchmark_findings(
+        report.findings,
+        truth,
+    )
+
+    assert truth["corruption"] == "C2_canonicalization_collision"
+
+    assert "I1.canonicalization_collision" in {
+        finding.rule_id
+        for finding in report.findings
+    }
+
+    assert "I2.cardinality_mismatch" in {
+        finding.rule_id
+        for finding in report.findings
+    }
+
+    assert evaluation.expected_violation_detected is True
+    assert evaluation.failure_type_correct is True
+
+    assert evaluation.localization_true_positives >= 1

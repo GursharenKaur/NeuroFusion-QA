@@ -55,6 +55,12 @@ def evaluate_benchmark_findings(
 
     findings = tuple(findings)
 
+    operation_target_rows = {
+        operation["target_row_index"]
+        for operation in truth.get("operations", [])
+        if "target_row_index" in operation
+    }
+
     detected_rule_ids = {
         finding.rule_id
         for finding in findings
@@ -85,20 +91,48 @@ def evaluate_benchmark_findings(
         if "row_index" in operation
     }
 
-    localized_operation_keys = {
-        _freeze_key(key)
-        for finding in findings
-        if any(
-            isinstance(evidence, dict)
-            and evidence.get("row_index") in operation_rows
-            for evidence in finding.evidence_rows
-        )
-        for key in finding.affected_keys
+    operation_target_rows = {
+        operation["target_row_index"]
+        for operation in truth.get("operations", [])
+        if "target_row_index" in operation
     }
+
+    localized_operation_keys = set()
+    operation_matched_observed_keys = set()
+
+    for finding in findings:
+        evidence_rows = {
+            evidence.get("row_index")
+            for evidence in finding.evidence_rows
+            if isinstance(evidence, dict)
+        }
+
+        operation_match = (
+            bool(evidence_rows & operation_rows)
+            or bool(evidence_rows & operation_target_rows)
+        )
+
+        if operation_match:
+            # The finding corresponds to a corruption operation whose clean
+            # affected key is stored separately in hidden truth.
+            localized_operation_keys.update(affected_keys)
+
+            # The observed detector keys are not false positives because
+            # operation evidence establishes their correspondence to the
+            # clean affected key.
+            operation_matched_observed_keys.update(
+                _freeze_key(key)
+                for key in finding.affected_keys
+            )
 
     true_positive_keys |= localized_operation_keys
 
-    false_positive_keys = localized_keys - true_positive_keys
+    false_positive_keys = (
+        localized_keys
+        - true_positive_keys
+        - operation_matched_observed_keys
+    )
+
 
     failure_type_correct = (
         bool(expected_violations)
