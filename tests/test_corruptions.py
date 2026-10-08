@@ -3,7 +3,7 @@ from neurofusion_qa.identity import canonicalize_participant_id
 from neurofusion_qa.identity import check_i6_metric_denominator_traceability
 
 from neurofusion_qa.corruptions import inject_corruption
-
+from neurofusion_qa.benchmark import build_synthetic_manifest
 
 def test_c1_namespace_stripping_changes_namespace():
     records = [
@@ -1492,3 +1492,77 @@ def test_c6_triggers_i6_denominator_mismatch():
 
     assert "I6.denominator_mismatch" in rule_ids
     assert "I6.denominator_mismatch" in truth["expected_violations"]
+
+def test_c1_affected_count_is_person_count():
+    records = build_synthetic_manifest(
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+    )
+
+    corrupted, truth = inject_corruption(
+        records,
+        corruption="C1_namespace_stripping",
+        affected_count=4,
+        seed=7,
+    )
+
+    assert len(truth["affected_keys"]) == 4
+    assert len(set(truth["affected_keys"])) == 4
+
+def test_c3_affected_count_is_person_count():
+    records = build_synthetic_manifest(
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+    )
+
+    corrupted, truth = inject_corruption(
+        records,
+        corruption="C3_duplicate_propagation",
+        affected_count=4,
+        seed=7,
+    )
+
+    assert len(truth["affected_keys"]) == 4
+    assert len(set(truth["affected_keys"])) == 4
+    assert len(corrupted) == len(records) + 4
+
+def test_c4_affected_count_is_person_count():
+    records = build_synthetic_manifest(
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+    )
+
+    corrupted, truth = inject_corruption(
+        records,
+        corruption="C4_cross_modal_permutation",
+        affected_count=4,
+        seed=7,
+    )
+
+    assert len(truth["affected_keys"]) == 4
+    assert len(set(truth["affected_keys"])) == 4
+
+def test_c2_affected_count_is_collision_instance_count():
+    records = build_synthetic_manifest(
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+    )
+
+    corrupted, truth = inject_corruption(
+        records,
+        corruption="C2_canonicalization_collision",
+        affected_count=4,
+        seed=7,
+    )
+
+    assert len(truth["affected_keys"]) == 4
+    assert len(set(truth["affected_keys"])) == 4
+    assert len(truth["operations"]) == 4

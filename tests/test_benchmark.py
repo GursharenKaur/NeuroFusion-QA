@@ -5,7 +5,10 @@ from neurofusion_qa.benchmark import (
     evaluate_benchmark_findings,
     build_synthetic_metric_evidence,
     build_synthetic_cross_modal_pairs_from_clean,
+    affected_count_for_severity,
+    generate_benchmark_jobs,
 )
+import pytest
 
 from neurofusion_qa.corruptions import inject_corruption
 from neurofusion_qa.reporting import audit_manifest
@@ -606,3 +609,125 @@ def test_c6_produces_i6_denominator_mismatch_finding():
     assert evaluation.detected is True
     assert evaluation.expected_violation_detected is True
     assert evaluation.failure_type_correct is True
+
+def test_c6_supports_multiple_affected_person_metrics():
+    clean_records = build_synthetic_manifest(
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+    )
+
+    clean_metrics, populations = build_synthetic_metric_evidence(
+        clean_records
+    )
+
+    corrupted_metrics, truth = inject_corruption(
+        clean_records,
+        corruption="C6_denominator_mismatch",
+        affected_count=4,
+        seed=20270915,
+        metrics=clean_metrics,
+        populations=populations,
+    )
+
+    report = audit_manifest(
+        clean_records,
+        metrics=corrupted_metrics,
+        populations=populations,
+    )
+
+    rule_ids = {
+        finding.rule_id
+        for finding in report.findings
+    }
+
+    assert "I6.denominator_mismatch" in rule_ids
+
+    evaluation = evaluate_benchmark_findings(
+        report.findings,
+        truth,
+    )
+
+    assert evaluation.detected is True
+    assert evaluation.expected_violation_detected is True
+    assert evaluation.expected_violation_count == 1
+    assert evaluation.detected_expected_violation_count == 1
+    assert evaluation.affected_key_count == 4
+    assert evaluation.localized_key_count == 4
+    assert evaluation.localization_true_positives == 4
+    assert evaluation.localization_false_positives == 0
+    assert evaluation.failure_type_correct is True
+
+def test_affected_count_for_severity_16_people():
+    assert affected_count_for_severity(16, 0.01) == 1
+    assert affected_count_for_severity(16, 0.05) == 1
+    assert affected_count_for_severity(16, 0.10) == 2
+    assert affected_count_for_severity(16, 0.25) == 4
+
+
+def test_affected_count_for_severity_64_people():
+    assert affected_count_for_severity(64, 0.01) == 1
+    assert affected_count_for_severity(64, 0.05) == 4
+    assert affected_count_for_severity(64, 0.10) == 7
+    assert affected_count_for_severity(64, 0.25) == 16
+
+
+def test_affected_count_for_severity_rejects_invalid_input():
+    with pytest.raises(ValueError):
+        affected_count_for_severity(0, 0.10)
+
+    with pytest.raises(ValueError):
+        affected_count_for_severity(16, 0.0)
+
+    with pytest.raises(ValueError):
+        affected_count_for_severity(16, 1.01)
+
+def test_generate_benchmark_jobs_has_expected_factorial_size():
+    jobs = generate_benchmark_jobs()
+
+    # 5 people × 2 modalities × 2 sessions × 2 runs
+    # × 6 corruptions × 4 severities × 100 seeds
+    # = 96,000 jobs.
+    assert len(jobs) == 96000
+
+
+def test_generate_benchmark_jobs_uses_protocol_severity_counts():
+    jobs = generate_benchmark_jobs(
+        people=(16,),
+        modalities=(2,),
+        sessions=(1,),
+        runs_per_modality=(1,),
+        corruptions=("C6_denominator_mismatch",),
+        severities=(0.01, 0.05, 0.10, 0.25),
+        seeds=(0,),
+    )
+
+    counts = {
+        job.severity: job.affected_count
+        for job in jobs
+    }
+
+    assert counts == {
+        0.01: 1,
+        0.05: 1,
+        0.10: 2,
+        0.25: 4,
+    }
+
+
+def test_generate_benchmark_jobs_is_deterministic():
+    kwargs = {
+        "people": (16, 64),
+        "modalities": (2,),
+        "sessions": (1,),
+        "runs_per_modality": (1,),
+        "corruptions": ("C1_namespace_stripping",),
+        "severities": (0.01, 0.25),
+        "seeds": (0, 1),
+    }
+
+    first = generate_benchmark_jobs(**kwargs)
+    second = generate_benchmark_jobs(**kwargs)
+
+    assert first == second

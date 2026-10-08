@@ -44,7 +44,6 @@ def _manifest_hash(records: list[Any]) -> str:
 
     return hashlib.sha256(payload).hexdigest()
 
-
 def _inject_c1_namespace_stripping(
     records: list[Any],
     *,
@@ -52,60 +51,65 @@ def _inject_c1_namespace_stripping(
     seed: int,
 ) -> tuple[list[Any], dict[str, Any]]:
     """
-    Remove dataset namespaces from a deterministic seed-selected
-    set of manifest records.
+    Remove dataset namespaces from one selected record for each affected
+    person key.
 
-    This is the C1 implementation convention.
-
-    Participant IDs and all other record fields are preserved.
+    `affected_count` is the number of affected person keys, matching the
+    protocol-defined synthetic severity unit.
     """
-
     if affected_count < 1:
-        raise ValueError(
-            "affected_count must be at least 1."
-        )
+        raise ValueError("affected_count must be at least 1.")
 
-    if affected_count > len(records):
+    person_to_indices: dict[tuple[Any, ...], list[int]] = {}
+
+    for index, record in enumerate(records):
+        if (
+            record.dataset_namespace is None
+            or record.dataset_version is None
+            or not record.participant_id
+        ):
+            continue
+
+        person_to_indices.setdefault(record.person_key, []).append(index)
+
+    eligible_people = sorted(person_to_indices)
+
+    if affected_count > len(eligible_people):
         raise ValueError(
-            "affected_count cannot exceed the number of records."
+            "affected_count cannot exceed the number of eligible person keys."
         )
 
     rng = random.Random(seed)
-
-    affected_indices = sorted(
-        rng.sample(
-            range(len(records)),
-            affected_count,
-        )
-    )
+    selected_people = rng.sample(eligible_people, affected_count)
 
     corrupted = list(records)
-
     affected_keys = []
+    operations = []
 
-    for index in affected_indices:
+    for person_key in selected_people:
+        index = rng.choice(person_to_indices[person_key])
         original = corrupted[index]
 
-        affected_keys.append(
-            original.person_key
-        )
+        affected_keys.append(person_key)
 
         corrupted[index] = replace(
             original,
             dataset_namespace=None,
         )
 
+        operations.append(
+            {
+                "operation": "remove_dataset_namespace",
+                "row_index": index,
+                "affected_person_key": person_key,
+            }
+        )
+
     truth = {
         "corruption": "C1_namespace_stripping",
         "seed": seed,
         "parent_manifest_sha256": _manifest_hash(records),
-        "operations": [
-            {
-                "operation": "remove_dataset_namespace",
-                "row_index": index,
-            }
-            for index in affected_indices
-        ],
+        "operations": operations,
         "affected_keys": affected_keys,
         "expected_violations": [
             "I1.namespace_completeness",
@@ -162,8 +166,28 @@ def _inject_c2_canonicalization_collision(
 
     rng = random.Random(seed)
 
-    selected_indices = rng.sample(
-        range(len(records)),
+    person_to_indices: dict[tuple[Any, ...], list[int]] = {}
+
+    for index, record in enumerate(records):
+        if (
+            record.dataset_namespace is None
+            or record.dataset_version is None
+            or not record.participant_id
+        ):
+            continue
+
+        person_to_indices.setdefault(record.person_key, []).append(index)
+
+    eligible_people = sorted(person_to_indices)
+
+    if len(eligible_people) < affected_count * 2:
+        raise ValueError(
+            "C2 requires at least two distinct eligible person keys "
+            "per collision instance."
+        )
+
+    selected_people = rng.sample(
+        eligible_people,
         affected_count * 2,
     )
 
@@ -172,8 +196,11 @@ def _inject_c2_canonicalization_collision(
     operations = []
 
     for pair_index in range(affected_count):
-        donor_index = selected_indices[2 * pair_index]
-        target_index = selected_indices[2 * pair_index + 1]
+        donor_person = selected_people[2 * pair_index]
+        target_person = selected_people[2 * pair_index + 1]
+
+        donor_index = rng.choice(person_to_indices[donor_person])
+        target_index = rng.choice(person_to_indices[target_person])
 
         donor = corrupted[donor_index]
         target = corrupted[target_index]
@@ -354,7 +381,7 @@ def _inject_c6_denominator_mismatch(
     records: list[Any],
     *,
     metrics: list[dict[str, Any]],
-    populations: dict[str, dict[str, Any]],
+    populations: dict[str, list[tuple[Any, ...]]],
     affected_count: int,
     seed: int,
 ):
@@ -482,7 +509,7 @@ def inject_corruption(
     affected_count: int,
     seed: int,
     metrics: list[dict[str, Any]] | None = None,
-    populations: dict[str, dict[str, Any]] | None = None,
+    populations: dict[str, list[tuple[Any, ...]]] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """
     Inject one documented corruption into a clean manifest.
@@ -565,36 +592,43 @@ def _inject_c3_duplicate_propagation(
     seed: int,
 ):
     """
-    Duplicate selected manifest/acquisition rows.
+    Duplicate one manifest/acquisition row for each affected person key.
 
-    `affected_count` is the number of source rows to duplicate.
-    Each selected row is copied once.
-
-    The clean input is never modified in place.
+    `affected_count` is the number of affected person keys. Exactly one
+    eligible row is duplicated for each selected person.
     """
     if affected_count < 1:
         raise ValueError("affected_count must be at least 1.")
 
-    if affected_count > len(records):
+    person_to_indices: dict[tuple[Any, ...], list[int]] = {}
+
+    for index, record in enumerate(records):
+        if (
+            record.dataset_namespace is None
+            or record.dataset_version is None
+            or not record.participant_id
+        ):
+            continue
+
+        person_to_indices.setdefault(record.person_key, []).append(index)
+
+    eligible_people = sorted(person_to_indices)
+
+    if affected_count > len(eligible_people):
         raise ValueError(
-            "affected_count cannot exceed the number of available records."
+            "affected_count cannot exceed the number of eligible person keys."
         )
 
     rng = random.Random(seed)
-
-    selected_indices = sorted(
-        rng.sample(range(len(records)), affected_count)
-    )
+    selected_people = rng.sample(eligible_people, affected_count)
 
     corrupted = list(records)
     operations = []
     affected_keys = []
 
-    # Append duplicates rather than replacing the original rows.
-    # This preserves the original evidence while introducing the
-    # duplicate propagation corruption.
-    for index in selected_indices:
-        original = records[index]
+    for person_key in selected_people:
+        source_index = rng.choice(person_to_indices[person_key])
+        original = records[source_index]
 
         corrupted.append(original)
 
@@ -603,8 +637,9 @@ def _inject_c3_duplicate_propagation(
         operations.append(
             {
                 "operation": "duplicate_manifest_row",
-                "source_row_index": index,
+                "source_row_index": source_index,
                 "duplicated_row_index": len(corrupted) - 1,
+                "affected_person_key": person_key,
                 "affected_acquisition_key": original.acquisition_key,
             }
         )
@@ -632,109 +667,74 @@ def _inject_c4_cross_modal_permutation(
     seed: int,
 ):
     """
-    Permute cross-modal identity assignment.
+    Reassign one modality-bearing record for each affected source person
+    to another person's participant ID.
 
-    For each corruption instance, select two records from different
-    participants and reassign the participant ID of one modality-B
-    record to the other participant.
-
-    The underlying acquisition/source evidence is preserved.
-
-    `affected_count` denotes the number of corrupted modality-B records.
-
-    The clean input is never modified in place.
+    `affected_count` is the number of affected source person keys.
     """
     if affected_count < 1:
         raise ValueError("affected_count must be at least 1.")
 
-    if affected_count > len(records):
-        raise ValueError(
-            "affected_count cannot exceed the number of available records."
-        )
+    eligible_by_person: dict[tuple[Any, ...], list[int]] = {}
 
-    # We need at least two distinct participant identities.
-    participant_keys = {
-        record.person_key
-        for record in records
-        if record.dataset_namespace is not None
-        and record.dataset_version is not None
-        and record.participant_id
-    }
+    for index, record in enumerate(records):
+        if (
+            record.dataset_namespace is None
+            or record.dataset_version is None
+            or not record.participant_id
+            or not record.modality
+        ):
+            continue
 
-    if len(participant_keys) < 2:
+        eligible_by_person.setdefault(record.person_key, []).append(index)
+
+    eligible_people = sorted(eligible_by_person)
+
+    if len(eligible_people) < 2:
         raise ValueError(
             "C4 requires at least two distinct participant identities."
         )
 
+    if affected_count > len(eligible_people):
+        raise ValueError(
+            "affected_count cannot exceed the number of eligible person keys."
+        )
+
     rng = random.Random(seed)
 
-    # Work with records that have an explicit modality and identity.
-    eligible_indices = [
-        index
-        for index, record in enumerate(records)
-        if record.dataset_namespace is not None
-        and record.dataset_version is not None
-        and record.participant_id
-        and record.modality
-    ]
-
-    if len(eligible_indices) < 2:
-        raise ValueError(
-            "C4 requires at least two modality-bearing records."
-        )
+    selected_source_people = rng.sample(
+        eligible_people,
+        affected_count,
+    )
 
     corrupted = list(records)
     operations = []
     affected_keys = []
 
-    available = list(eligible_indices)
-
-    for _ in range(affected_count):
-        if len(available) < 2:
-            raise ValueError(
-                "Not enough eligible records for the requested "
-                "number of C4 corruption instances."
-            )
-
-        rng.shuffle(available)
-
-        source_index = None
-        target_index = None
-
-        for candidate_source in available:
-            source = corrupted[candidate_source]
-
-            for candidate_target in available:
-                if candidate_source == candidate_target:
-                    continue
-
-                target = corrupted[candidate_target]
-
-                # Keep the corruption within the same namespace/version.
-                if (
-                    source.dataset_namespace != target.dataset_namespace
-                    or source.dataset_version != target.dataset_version
-                ):
-                    continue
-
-                # The two records must belong to different participants.
-                if source.person_key == target.person_key:
-                    continue
-
-                source_index = candidate_source
-                target_index = candidate_target
-                break
-
-            if source_index is not None:
-                break
-
-        if source_index is None or target_index is None:
-            raise ValueError(
-                "Unable to construct a valid C4 cross-modal permutation "
-                "from the supplied records."
-            )
-
+    for source_person_key in selected_source_people:
+        source_index = rng.choice(
+            eligible_by_person[source_person_key]
+        )
         source = corrupted[source_index]
+
+        possible_targets = [
+            person_key
+            for person_key in eligible_people
+            if person_key != source_person_key
+            and person_key[0] == source_person_key[0]
+            and person_key[1] == source_person_key[1]
+        ]
+
+        if not possible_targets:
+            raise ValueError(
+                "C4 requires another participant in the same "
+                "dataset namespace/version."
+            )
+
+        target_person_key = rng.choice(possible_targets)
+
+        target_indices = eligible_by_person[target_person_key]
+        target_index = rng.choice(target_indices)
         target = corrupted[target_index]
 
         original_source_key = source.person_key
@@ -749,7 +749,9 @@ def _inject_c4_cross_modal_permutation(
 
         operations.append(
             {
-                "operation": "reassign_modality_record_to_other_participant",
+                "operation": (
+                    "reassign_modality_record_to_other_participant"
+                ),
                 "source_row_index": source_index,
                 "target_row_index": target_index,
                 "original_person_key": original_source_key,
@@ -757,9 +759,6 @@ def _inject_c4_cross_modal_permutation(
                 "modality": source.modality,
             }
         )
-
-        # Prevent the same source record from being selected again.
-        available.remove(source_index)
 
     truth = {
         "corruption": "C4_cross_modal_permutation",

@@ -13,6 +13,42 @@ from .manifest import ManifestRecord
 SYNTHETIC_NAMESPACE = "synthetic:identityguard"
 SYNTHETIC_VERSION = "1.0"
 
+
+def affected_count_for_severity(
+    eligible_people: int,
+    severity: float,
+) -> int:
+    """
+    Convert protocol-defined severity into an affected-person count.
+
+    The research protocol defines severity as the fraction of eligible
+    person keys affected, rounded up to at least one.
+
+    This helper implements that benchmark convention centrally so the
+    factorial runner does not duplicate the calculation.
+    """
+    if eligible_people < 1:
+        raise ValueError(
+            "eligible_people must be at least 1."
+        )
+
+    if not 0 < severity <= 1:
+        raise ValueError(
+            "severity must be greater than 0 and at most 1."
+        )
+
+    # ceil(eligible_people * severity), written without a floating-point
+    # math.ceil dependency.
+    affected_count = int(
+        eligible_people * severity
+    )
+
+    if affected_count < eligible_people * severity:
+        affected_count += 1
+
+    return max(1, affected_count)
+
+
 @dataclass(frozen=True)
 class BenchmarkJob:
     experiment_id: str
@@ -36,6 +72,73 @@ class BenchmarkEvaluation:
     localization_true_positives: int
     localization_false_positives: int
     failure_type_correct: bool
+
+def generate_benchmark_jobs(
+    *,
+    people: Iterable[int] = (16, 64, 256, 1024, 4096),
+    modalities: Iterable[int] = (2, 3),
+    sessions: Iterable[int] = (1, 2),
+    runs_per_modality: Iterable[int] = (1, 4),
+    corruptions: Iterable[str] = (
+        "C1_namespace_stripping",
+        "C2_canonicalization_collision",
+        "C3_duplicate_propagation",
+        "C4_cross_modal_permutation",
+        "C5_subject_split_leakage",
+        "C6_denominator_mismatch",
+    ),
+    severities: Iterable[float] = (0.01, 0.05, 0.10, 0.25),
+    seeds: Iterable[int] = range(100),
+) -> list[BenchmarkJob]:
+    """
+    Generate the deterministic synthetic E2 factorial benchmark design.
+
+    Severity is converted to affected_count using the protocol-defined
+    fraction of eligible person keys.
+
+    This function only generates job specifications. It does not create
+    manifests, inject corruptions, execute audits, or write files.
+    """
+    jobs: list[BenchmarkJob] = []
+
+    for person_count in people:
+        for modality_count in modalities:
+            for session_count in sessions:
+                for run_count in runs_per_modality:
+                    for corruption in corruptions:
+                        for severity in severities:
+                            affected_count = affected_count_for_severity(
+                                person_count,
+                                severity,
+                            )
+
+                            for seed in seeds:
+                                experiment_id = (
+                                    f"synthetic_"
+                                    f"p{person_count}_"
+                                    f"m{modality_count}_"
+                                    f"s{session_count}_"
+                                    f"r{run_count}_"
+                                    f"{corruption}_"
+                                    f"sev{severity:g}_"
+                                    f"seed{seed:03d}"
+                                )
+
+                                jobs.append(
+                                    BenchmarkJob(
+                                        experiment_id=experiment_id,
+                                        people=person_count,
+                                        modalities=modality_count,
+                                        sessions=session_count,
+                                        runs_per_modality=run_count,
+                                        corruption=corruption,
+                                        severity=severity,
+                                        affected_count=affected_count,
+                                        seed=seed,
+                                    )
+                                )
+
+    return jobs
 
 def evaluate_benchmark_findings(
     findings: Iterable[Finding],
@@ -489,12 +592,17 @@ def build_synthetic_metric_evidence(
     Build explicit synthetic metric/population evidence for I6.
 
     Implementation convention:
-    - The audited population is defined by unique namespace-qualified
-      person keys.
-    - Each metric explicitly declares that population.
-    - The default denominator is the unique person count.
-    - An explicit denominator_override can represent downstream
-      metric-denominator propagation in a corruption benchmark.
+    - Each eligible namespace-qualified person key has one traceable
+      synthetic metric.
+    - Each metric explicitly declares a population containing that
+      person key.
+    - The clean denominator is therefore 1 for each person-level metric.
+    - An explicit denominator_override changes the declared denominator
+      while leaving population membership and numerator unchanged.
+
+    This person-level metric representation allows the synthetic C6
+    affected count to follow the protocol-defined severity unit:
+    eligible person keys.
 
     This is benchmark evidence supplied to the audit engine. It is not
     hidden corruption truth and is not an additional research-protocol
@@ -502,7 +610,7 @@ def build_synthetic_metric_evidence(
     """
     records = list(records)
 
-    population = sorted(
+    population_keys = sorted(
         {
             record.person_key
             for record in records
@@ -514,26 +622,32 @@ def build_synthetic_metric_evidence(
         }
     )
 
-    population_key = "synthetic_population_v1"
+    metrics: list[dict[str, Any]] = []
+    populations: dict[str, list[tuple[Any, ...]]] = {}
 
-    populations = {
-        population_key: population,
-    }
+    for index, person_key in enumerate(population_keys):
+        population_key = (
+            f"synthetic_population_person_{index:05d}"
+        )
 
-    denominator = (
-        len(population)
-        if denominator_override is None
-        else denominator_override
-    )
+        populations[population_key] = [person_key]
 
-    metrics = [
-        {
-            "metric_name": "synthetic_accuracy",
-            "split": "all",
-            "numerator": denominator,
-            "denominator": denominator,
-            "population_key": population_key,
-        }
-    ]
+        denominator = (
+            1
+            if denominator_override is None
+            else denominator_override
+        )
+
+        metrics.append(
+            {
+                "metric_name": (
+                    f"synthetic_accuracy_{index:05d}"
+                ),
+                "split": "all",
+                "numerator": 1,
+                "denominator": denominator,
+                "population_key": population_key,
+            }
+        )
 
     return metrics, populations
