@@ -424,24 +424,6 @@ All C1–C6 generators preserve the clean input and emit hidden truth containing
 the parent manifest hash, seed, operations, affected keys, and expected
 violations.
 
-## Implementation Status at C1–C6 Checkpoint
-
-All invariant families I1–I6 and corruption generators C1–C6 have been
-implemented and covered by automated tests.
-
-Current verification checkpoint:
-
-- C6 corruption tests: 7 passed
-- Synthetic benchmark tests: 19 passed
-- Full test suite: 147 passed
-
-The C1–C6 benchmark tests verify detection of the declared primary
-violations and benchmark evaluation of expected failure types.
-
-No benchmark summary results are represented by these automated tests;
-factorial benchmark execution and aggregate performance reporting remain a
-separate experimental stage.
-
 ## Synthetic Benchmark Implementation Conventions
 
 The research protocol specifies the synthetic benchmark grid, corruption
@@ -521,8 +503,9 @@ of the research protocol.
 
 ### Synthetic C2 Cross-Modal Join Convention
 
-For the synthetic C2 benchmark, I2 is evaluated using an explicit
-one-to-one relation between the first two synthetic modality labels.
+For the synthetic C2 benchmark, I2 is evaluated using explicit one-to-one relations between synthetic modality pairs. With two modalities, one pairwise relation is constructed. With three modalities, each unordered pair is checked independently, resulting in three pairwise relations.
+
+This pairwise construction is an implementation convention that extends the existing two-modality synthetic join evidence to the three-modality benchmark configuration. It does not change the research protocol's identity requirements.
 
 The join key is:
 
@@ -534,9 +517,7 @@ The join key is:
 - `acquisition`
 - `run`
 
-This preserves one join unit per participant/session/acquisition/run on each
-modality even when the synthetic benchmark varies the number of sessions or
-runs.
+Each pairwise relation uses the same join-key fields and preserves one join unit per participant/session/acquisition/run on each modality, including when the benchmark varies sessions, runs, or modality count.
 
 The relation is supplied explicitly to the audit engine through the existing
 `join_checks` interface. The audit engine does not infer this relation from
@@ -619,3 +600,32 @@ supplied to the detector.
 
 This is an implementation convention for the synthetic benchmark and is not
 an additional requirement of the research protocol.
+
+### Benchmark Execution, Provenance, and Measurements
+
+Each benchmark job writes the required artifacts to a temporary directory and publishes the job directory after writing its completion marker. The marker records hashes for the ten required output artifacts. Resume validation checks the experiment identifier, the complete expected artifact inventory, and the recorded hashes. Existing invalid or incomplete job directories are preserved for inspection and are not silently overwritten.
+
+The `git_commit.txt` artifact records:
+
+- the Git commit identifier;
+- whether the Git working tree is clean, dirty, or unknown;
+- a SHA-256 fingerprint of Python source files under `src/neurofusion_qa`.
+
+The source-tree fingerprint does not cover the entire repository, including tests, configuration, and documentation. The Git commit and working-tree status are recorded separately so that uncommitted source changes are not mistaken for a clean committed revision.
+
+Runtime is measured from the start of synthetic manifest generation through corruption, auditing, and evaluation, before artifact serialization. Peak memory is measured using Python's `tracemalloc` and represents traced Python allocations, not process-wide resident memory.
+
+These execution, provenance, and measurement details are implementation conventions. Smoke-test observations are not substitutes for the protocol's full factorial benchmark or aggregate statistical analysis.
+
+Current verification checkpoint:
+
+- Synthetic benchmark tests: 33 passed
+- Full test suite: 165 passed
+
+The three-modality C2 and C3 smoke jobs completed successfully, with their ten required artifact hashes independently verified. These are implementation smoke tests, not factorial benchmark results.
+
+The C1–C6 benchmark tests verify detection of declared primary violations and benchmark evaluation of expected failure types.
+
+No aggregate benchmark performance results are represented by these tests or smoke jobs. Factorial benchmark execution and aggregate performance reporting remain a separate experimental stage.
+
+The three-modality C2 and C3 smoke jobs completed successfully. Their metrics include parent-manifest and configuration hashes, code provenance, rule outputs, and detection/localization results. All ten required artifact hashes per job were independently verified. Resume verification confirmed that completed jobs were reused without changing their completion markers. These are implementation smoke tests, not factorial benchmark results.

@@ -1,14 +1,22 @@
-from __future__ import annotations
-
 import hashlib
-from dataclasses import dataclass
+import json
+import platform
+import subprocess
+import sys
+import time
+import tracemalloc
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Iterable
 
 from .identity import (
     Finding,
     canonicalize_participant_id,
 )
+from .corruptions import inject_corruption
 from .manifest import ManifestRecord
+from .reporting import audit_manifest
 
 SYNTHETIC_NAMESPACE = "synthetic:identityguard"
 SYNTHETIC_VERSION = "1.0"
@@ -176,11 +184,70 @@ def evaluate_benchmark_findings(
     detected = bool(findings)
     expected_violation_detected = bool(detected_expected)
 
-    localized_keys = {
-        _freeze_key(key)
-        for finding in findings
-        for key in finding.affected_keys
-    }
+    if truth.get("corruption") in {
+        "C1_namespace_stripping",
+        "C2_canonicalization_collision",
+    }:
+        # C1 localization is evaluated at the person-key level.
+        # Cross-modal pairs and acquisition keys remain valid findings,
+        # but are not separate localized people.
+        localized_keys = {
+            _freeze_key(key)
+            for finding in findings
+            if finding.key_type == "person_key"
+            for key in finding.affected_keys
+        }
+    else:
+        localized_keys = {
+            _freeze_key(key)
+            for finding in findings
+            for key in finding.affected_keys
+        }
+
+    corruption = truth.get("corruption")
+
+    if corruption == "C4_cross_modal_permutation":
+        # C4 truth identifies the original source person.
+        # The destination person is involved in the pair but is
+        # not the injected corruption target.
+        localized_keys = {
+            _freeze_key(operation["original_person_key"])
+            for operation in truth.get("operations", [])
+            if operation.get("operation")
+            == "reassign_modality_record_to_other_participant"
+            and operation.get("original_person_key") is not None
+        }
+
+    elif corruption == "C3_duplicate_propagation":
+        # Localize the duplicated acquisition using direct I4 evidence.
+        localized_keys = {
+            _freeze_key(key)
+            for finding in findings
+            if finding.rule_id in {
+                "I4.repeated_row",
+                "I4.repeated_source_path",
+            }
+            for key in finding.affected_keys
+        }
+
+    elif corruption in {
+        "C1_namespace_stripping",
+        "C2_canonicalization_collision",
+    }:
+        # Evaluate identity-changing corruptions at person-key level.
+        localized_keys = {
+            _freeze_key(key)
+            for finding in findings
+            if finding.key_type == "person_key"
+            for key in finding.affected_keys
+        }
+
+    else:
+        localized_keys = {
+            _freeze_key(key)
+            for finding in findings
+            for key in finding.affected_keys
+        }
 
     true_positive_keys = localized_keys & affected_keys
 
@@ -248,7 +315,7 @@ def evaluate_benchmark_findings(
         expected_violation_count=len(expected_violations),
         detected_expected_violation_count=len(detected_expected),
         affected_key_count=len(affected_keys),
-        localized_key_count=len(localized_keys),
+        localized_key_count=len(true_positive_keys | false_positive_keys),
         localization_true_positives=len(true_positive_keys),
         localization_false_positives=len(false_positive_keys),
         failure_type_correct=failure_type_correct,
@@ -521,40 +588,15 @@ def build_synthetic_cross_modal_pairs_from_clean(
 
     return pairs
 
-def build_synthetic_cross_modal_join_check(
-    records: Iterable[ManifestRecord],
+
+def _build_synthetic_join_check_for_pair(
+    records: list[ManifestRecord],
+    left_modality: str,
+    right_modality: str,
 ) -> dict[str, Any]:
-    """
-    Build explicit one-to-one cross-modal join evidence for the synthetic
-    benchmark.
+    """Build one-to-one join evidence for a specific modality pair."""
 
-    The synthetic benchmark uses the first two modality labels as the two
-    sides of the declared relation. Join keys are namespace-qualified
-    canonical participant identity plus session/acquisition/run context.
-
-    This is supplemental benchmark evidence supplied to I2. It is not
-    hidden corruption truth and does not infer cross-dataset identity.
-    """
-    records = list(records)
-
-    modalities = sorted(
-        {
-            record.modality
-            for record in records
-            if record.modality is not None
-        }
-    )
-
-    if len(modalities) != 2:
-        raise ValueError(
-            "Synthetic cross-modal I2 join requires exactly two modalities."
-        )
-
-    left_modality, right_modality = modalities
-
-    def counts_for_modality(
-        modality: str,
-    ) -> dict[Any, int]:
+    def counts_for_modality(modality: str) -> dict[Any, int]:
         counts: dict[Any, int] = {}
 
         for record in records:
@@ -564,9 +606,7 @@ def build_synthetic_cross_modal_join_check(
             join_key = (
                 record.dataset_namespace,
                 record.dataset_version,
-                canonicalize_participant_id(
-                    record.participant_id
-                ),
+                canonicalize_participant_id(record.participant_id),
                 record.session_id,
                 record.task,
                 record.acquisition,
@@ -582,6 +622,57 @@ def build_synthetic_cross_modal_join_check(
         "right_counts": counts_for_modality(right_modality),
         "relation": "one_to_one",
     }
+
+
+def build_synthetic_cross_modal_join_check(
+    records: Iterable[ManifestRecord],
+) -> dict[str, Any]:
+    """Build join evidence for exactly two synthetic modalities."""
+    records = list(records)
+
+    modalities = sorted({
+        record.modality
+        for record in records
+        if record.modality is not None
+    })
+
+    if len(modalities) != 2:
+        raise ValueError(
+            "Synthetic cross-modal I2 join requires exactly two modalities."
+        )
+
+    return _build_synthetic_join_check_for_pair(
+        records, modalities[0], modalities[1]
+    )
+
+
+def build_synthetic_cross_modal_join_checks(
+    records: Iterable[ManifestRecord],
+) -> list[dict[str, Any]]:
+    """Build one-to-one join evidence for every unordered modality pair.
+
+    Implementation convention: each modality pair is checked independently.
+    """
+    records = list(records)
+
+    modalities = sorted({
+        record.modality
+        for record in records
+        if record.modality is not None
+    })
+
+    if len(modalities) < 2:
+        raise ValueError(
+            "Synthetic cross-modal I2 joins require at least two modalities."
+        )
+
+    return [
+        _build_synthetic_join_check_for_pair(
+            records, modalities[i], modalities[j]
+        )
+        for i in range(len(modalities))
+        for j in range(i + 1, len(modalities))
+    ]
 
 def build_synthetic_metric_evidence(
     records: Iterable[ManifestRecord],
@@ -651,3 +742,468 @@ def build_synthetic_metric_evidence(
         )
 
     return metrics, populations
+
+def _git_commit() -> str:
+    """Return the current Git commit for benchmark provenance."""
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            text=True,
+            stderr=subprocess.STDOUT,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
+
+
+def _git_working_tree_status() -> str:
+    """Describe whether tracked or untracked repository changes exist."""
+    try:
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain"],
+            text=True,
+            stderr=subprocess.STDOUT,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
+
+    return "dirty" if status else "clean"
+
+
+def _code_provenance() -> str:
+    """Record Git revision and the current Python source-tree fingerprint."""
+    return "\n".join(
+        [
+            f"git_commit={_git_commit()}",
+            f"working_tree_status={_git_working_tree_status()}",
+            f"python_source_tree_sha256={_source_tree_hash()}",
+        ]
+    ) + "\n"
+
+def _environment_snapshot() -> str:
+    """Return a compact reproducible environment description."""
+    return "\n".join(
+        [
+            f"python={sys.version}",
+            f"platform={platform.platform()}",
+            f"executable={sys.executable}",
+        ]
+    )
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8")
+
+
+def _write_json(path: Path, value: object) -> None:
+    path.write_text(
+        json.dumps(value, indent=2, sort_keys=True, default=str) + "\n",
+        encoding="utf-8",
+    )
+
+@dataclass(frozen=True)
+class BenchmarkJobResult:
+    experiment_id: str
+    job_directory: str
+    completed: bool
+    runtime_seconds: float
+    peak_memory_bytes: int
+    detection: dict[str, object]
+    output_hashes: dict[str, str]
+
+def _manifest_records_sha256(
+    records: Iterable[ManifestRecord],
+) -> str:
+    """Hash a manifest deterministically from its serialized records."""
+    records = list(records)
+
+    rows = []
+    for record in records:
+        rows.append(
+            {
+                field: getattr(record, field)
+                for field in record.__dataclass_fields__
+            }
+        )
+
+    payload = json.dumps(
+        rows,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    """Return the SHA-256 digest of a file."""
+    digest = hashlib.sha256()
+
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+
+    return digest.hexdigest()
+
+
+def _source_tree_hash() -> str:
+    """Return a deterministic hash of the Python source tree."""
+    root = Path(__file__).resolve().parent
+
+    digest = hashlib.sha256()
+
+    for path in sorted(root.rglob("*.py")):
+        digest.update(
+            str(path.relative_to(root)).encode("utf-8")
+        )
+        digest.update(path.read_bytes())
+
+    return digest.hexdigest()
+
+def _write_manifest_tsv(
+    records: Iterable[ManifestRecord],
+    path: Path,
+) -> None:
+    """Write synthetic benchmark records as a deterministic TSV."""
+    records = list(records)
+
+    fields = list(ManifestRecord.__dataclass_fields__)
+
+    lines = [
+        "\t".join(fields),
+    ]
+
+    for record in records:
+        values = []
+
+        for field in fields:
+            value = getattr(record, field)
+
+            if value is None:
+                value = ""
+
+            values.append(str(value))
+
+        lines.append("\t".join(values))
+
+    path.write_text(
+        "\n".join(lines) + "\n",
+        encoding="utf-8",
+    )
+
+BENCHMARK_OUTPUT_NAMES = (
+    "config.snapshot.yaml",
+    "environment.txt",
+    "git_commit.txt",
+    "parent_manifest.sha256",
+    "corrupted_manifest.tsv",
+    "truth.json",
+    "audit_report.json",
+    "metrics.json",
+    "stdout.log",
+    "stderr.log",
+)
+
+def run_benchmark_job(
+    job: BenchmarkJob,
+    *,
+    output_root: Path,
+    config_path: Path,
+    resume: bool = True,
+) -> BenchmarkJobResult:
+    """
+    Execute exactly one synthetic benchmark job.
+
+    The job is written atomically into its final directory only after
+    all required artifacts have been produced successfully.
+    """
+    output_root = Path(output_root)
+    config_path = Path(config_path)
+
+    final_dir = output_root / job.experiment_id
+    marker = final_dir / "completed.json"
+
+    if resume and final_dir.exists() and marker.exists():
+        try:
+            marker_data = json.loads(marker.read_text(encoding="utf-8"))
+            expected_hashes = marker_data["output_hashes"]
+
+            valid = (
+                marker_data.get("experiment_id") == job.experiment_id
+                and isinstance(expected_hashes, dict)
+                and set(expected_hashes) == set(BENCHMARK_OUTPUT_NAMES)
+            )
+
+            if valid:
+                for filename in BENCHMARK_OUTPUT_NAMES:
+                    path = final_dir / filename
+                    expected_hash = expected_hashes[filename]
+
+                    if not path.is_file():
+                        valid = False
+                        break
+
+                    if not isinstance(expected_hash, str):
+                        valid = False
+                        break
+
+                    actual_hash = hashlib.sha256(
+                        path.read_bytes()
+                    ).hexdigest()
+
+                    if actual_hash != expected_hash:
+                        valid = False
+                        break
+
+            if valid:
+                return BenchmarkJobResult(
+                    experiment_id=job.experiment_id,
+                    job_directory=str(final_dir),
+                    completed=True,
+                    runtime_seconds=float(marker_data["runtime_seconds"]),
+                    peak_memory_bytes=int(marker_data["peak_memory_bytes"]),
+                    detection=marker_data["detection"],
+                    output_hashes=expected_hashes,
+                )
+        except (OSError, KeyError, ValueError, json.JSONDecodeError):
+            pass
+
+    if final_dir.exists():
+        raise RuntimeError(
+            "Existing benchmark job directory is not a valid completed job: "
+            f"{final_dir}. Preserve the directory for inspection or move it "
+            "aside before rerunning this experiment."
+        )
+
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    with TemporaryDirectory(
+        prefix=f".{job.experiment_id}.",
+        dir=output_root,
+    ) as temporary:
+        temp_dir = Path(temporary)
+
+        started = time.perf_counter()
+        tracemalloc.start()
+
+        try:
+            # 1. Build clean synthetic manifest.
+            clean_records = build_synthetic_manifest(
+                people=job.people,
+                modalities=job.modalities,
+                sessions=job.sessions,
+                runs_per_modality=job.runs_per_modality,
+            )
+
+            # 2. Hash clean parent manifest.
+            parent_manifest_sha256 = _manifest_records_sha256(clean_records)
+
+            # 3. Inject corruption while keeping truth separate.
+            clean_metrics = None
+            clean_populations = None
+
+            if job.corruption == "C6_denominator_mismatch":
+                clean_metrics, clean_populations = (
+                    build_synthetic_metric_evidence(clean_records)
+                )
+
+            corrupted_records, truth = inject_corruption(
+                clean_records,
+                corruption=job.corruption,
+                affected_count=job.affected_count,
+                seed=job.seed,
+                metrics=clean_metrics,
+                populations=clean_populations,
+            )
+
+            # 4. Build supplemental evidence required by the audit.
+            join_checks = None
+            cross_modal_pairs = None
+            metrics = None
+            populations = None
+            if job.corruption == "C2_canonicalization_collision":
+                join_checks = build_synthetic_cross_modal_join_checks(
+                    corrupted_records
+                )
+
+            if job.corruption == "C3_duplicate_propagation":
+                join_checks = build_synthetic_cross_modal_join_checks(
+                    corrupted_records
+                )
+
+                clean_population = {
+                    record.person_key for record in clean_records
+                }
+
+                metrics, populations = build_synthetic_metric_evidence(
+                    corrupted_records,
+                    denominator_override=len(clean_population) + 1,
+                )
+
+            if job.corruption in {
+                "C1_namespace_stripping",
+                "C4_cross_modal_permutation",
+            }:
+                cross_modal_pairs = build_synthetic_cross_modal_pairs_from_clean(
+                    clean_records,
+                    corrupted_records,
+                )
+
+
+            if job.corruption == "C6_denominator_mismatch":
+                # C6 changes metric denominators, not manifest records.
+                metrics = corrupted_records
+                populations = clean_populations
+                corrupted_records = clean_records
+
+            # 5. Run the IdentityGuard audit.
+            manifest_hash = _manifest_records_sha256(corrupted_records)
+
+            report = audit_manifest(
+                corrupted_records,
+                join_checks=join_checks,
+                cross_modal_pairs=cross_modal_pairs,
+                metrics=metrics,
+                populations=populations,
+                manifest_hash=manifest_hash,
+                config_hash=_sha256_file(config_path),
+                code_hash=_source_tree_hash(),
+            )
+
+            # 6. Evaluate against hidden corruption truth.
+            evaluation = evaluate_benchmark_findings(
+                report.findings,
+                truth,
+            )
+
+            runtime_seconds = time.perf_counter() - started
+            _, peak_memory_bytes = tracemalloc.get_traced_memory()
+
+            # 7. Write required artifacts.
+            config_snapshot = config_path.read_text(encoding="utf-8")
+
+            _write_text(
+                temp_dir / "config.snapshot.yaml",
+                config_snapshot,
+            )
+            _write_text(
+                temp_dir / "environment.txt",
+                _environment_snapshot(),
+            )
+            code_provenance = _code_provenance()
+            provenance_fields = dict(
+                line.split("=", 1)
+                for line in code_provenance.splitlines()
+            )
+
+            _write_text(
+                temp_dir / "git_commit.txt",
+                code_provenance,
+            )
+            _write_text(
+                temp_dir / "parent_manifest.sha256",
+                parent_manifest_sha256 + "\n",
+            )
+
+            _write_manifest_tsv(
+                corrupted_records,
+                temp_dir / "corrupted_manifest.tsv",
+            )
+
+            _write_json(
+                temp_dir / "truth.json",
+                truth,
+            )
+
+            _write_text(
+                temp_dir / "audit_report.json",
+                report.to_json(),
+            )
+
+            audit_report_payload = json.loads(report.to_json())
+            config_sha256 = hashlib.sha256(
+                (temp_dir / "config.snapshot.yaml").read_bytes()
+            ).hexdigest()
+
+            metrics_payload = {
+                "experiment_id": job.experiment_id,
+                "parent_manifest_sha256": parent_manifest_sha256,
+                "config_sha256": config_sha256,
+                "git_commit": provenance_fields["git_commit"],
+                "working_tree_status": provenance_fields["working_tree_status"],
+                "python_source_tree_sha256": provenance_fields[
+                    "python_source_tree_sha256"
+                ],
+                "people": job.people,
+                "modalities": job.modalities,
+                "sessions": job.sessions,
+                "runs_per_modality": job.runs_per_modality,
+                "corruption": job.corruption,
+                "severity": job.severity,
+                "affected_count": job.affected_count,
+                "seed": job.seed,
+                "runtime_seconds": runtime_seconds,
+                "peak_memory_bytes": peak_memory_bytes,
+                "rule_outputs": audit_report_payload,
+                "detection": asdict(evaluation),
+            }
+
+            _write_json(
+                temp_dir / "metrics.json",
+                metrics_payload,
+            )
+
+            _write_text(
+                temp_dir / "stdout.log",
+                "",
+            )
+            _write_text(
+                temp_dir / "stderr.log",
+                "",
+            )
+
+            # 8. Hash all required outputs.
+            output_names = BENCHMARK_OUTPUT_NAMES
+
+            output_hashes = {
+                name: hashlib.sha256(
+                    (temp_dir / name).read_bytes()
+                ).hexdigest()
+                for name in output_names
+            }
+
+            # 9. Completed marker is written last.
+            _write_json(
+                temp_dir / "completed.json",
+                {
+                    "experiment_id": job.experiment_id,
+                    "runtime_seconds": runtime_seconds,
+                    "peak_memory_bytes": peak_memory_bytes,
+                    "detection": asdict(evaluation),
+                    "output_hashes": output_hashes,
+                },
+            )
+
+            if final_dir.exists():
+                raise FileExistsError(
+                    f"Benchmark job directory already exists: {final_dir}"
+                )
+
+            temp_dir.rename(final_dir)
+
+            return BenchmarkJobResult(
+                experiment_id=job.experiment_id,
+                job_directory=str(final_dir),
+                completed=True,
+                runtime_seconds=runtime_seconds,
+                peak_memory_bytes=peak_memory_bytes,
+                detection=asdict(evaluation),
+                output_hashes=output_hashes,
+            )
+
+        finally:
+            tracemalloc.stop()

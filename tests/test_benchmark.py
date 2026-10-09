@@ -9,7 +9,8 @@ from neurofusion_qa.benchmark import (
     generate_benchmark_jobs,
 )
 import pytest
-
+import json
+import hashlib
 from neurofusion_qa.corruptions import inject_corruption
 from neurofusion_qa.reporting import audit_manifest
 
@@ -731,3 +732,328 @@ def test_generate_benchmark_jobs_is_deterministic():
     second = generate_benchmark_jobs(**kwargs)
 
     assert first == second
+
+
+def test_c1_localization_does_not_count_mixed_key_types_as_people():
+    affected_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00013",
+    )
+
+    findings = [
+        Finding(
+            rule_id="I1.namespace_completeness",
+            severity="ERROR",
+            message="Missing namespace.",
+            key_type="person_key",
+            affected_keys=((None, "1.0", "sub-00013"),),
+            expected="present",
+            observed=None,
+            evidence_rows=({"row_index": 25},),
+            remediation="Restore dataset namespace.",
+        ),
+        Finding(
+            rule_id="I3.person_pairing",
+            severity="ERROR",
+            message="Cross-modal identity mismatch.",
+            key_type="cross_modal_pair",
+            affected_keys=(
+                (
+                    affected_key,
+                    (None, "1.0", "sub-00013"),
+                ),
+            ),
+            expected="same person",
+            observed="different person keys",
+            evidence_rows=({"row_index": 25},),
+            remediation="Restore correct identity pairing.",
+        ),
+        Finding(
+            rule_id="I4.missing_parent_acquisition",
+            severity="ERROR",
+            message="Parent acquisition key is missing.",
+            key_type="acquisition_key",
+            affected_keys=(
+                (None, "1.0", "sub-00013", "ses-01",
+                 "mod-02", "task-synthetic", "acq-01", "01"),
+            ),
+            expected="parent acquisition present",
+            observed=None,
+            evidence_rows=({"row_index": 25},),
+            remediation="Restore acquisition lineage.",
+        ),
+    ]
+
+    truth = {
+        "corruption": "C1_namespace_stripping",
+        "operations": [
+            {
+                "operation": "remove_dataset_namespace",
+                "row_index": 25,
+            }
+        ],
+        "expected_violations": [
+            "I1.namespace_completeness",
+            "I3.person_pairing",
+        ],
+        "affected_keys": [affected_key],
+    }
+
+    evaluation = evaluate_benchmark_findings(findings, truth)
+
+    assert evaluation.detected is True
+    assert evaluation.failure_type_correct is True
+    assert evaluation.affected_key_count == 1
+    assert evaluation.localized_key_count == 1
+    assert evaluation.localization_true_positives == 1
+    assert evaluation.localization_false_positives == 0
+
+
+def test_resume_rejects_existing_job_with_tampered_artifact(tmp_path):
+    from pathlib import Path
+
+    from neurofusion_qa.benchmark import (
+        BenchmarkJob,
+        run_benchmark_job,
+    )
+
+    config_path = Path("config/identityguard_protocol.yaml")
+    output_root = tmp_path / "benchmark"
+
+    job = BenchmarkJob(
+        experiment_id="resume_tampered_C4",
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+        corruption="C4_cross_modal_permutation",
+        severity=0.01,
+        affected_count=1,
+        seed=0,
+    )
+
+    first = run_benchmark_job(
+        job,
+        output_root=output_root,
+        config_path=config_path,
+        resume=False,
+    )
+
+    metrics_path = Path(first.job_directory) / "metrics.json"
+    original_bytes = metrics_path.read_bytes()
+
+    try:
+        metrics_path.write_bytes(original_bytes + b"\n")
+
+        with pytest.raises(RuntimeError, match="not a valid completed job"):
+            run_benchmark_job(
+                job,
+                output_root=output_root,
+                config_path=config_path,
+                resume=True,
+            )
+
+        # Invalid artifacts must be preserved for inspection.
+        assert metrics_path.read_bytes() == original_bytes + b"\n"
+    finally:
+        metrics_path.write_bytes(original_bytes)
+
+
+def test_resume_reuses_valid_completed_job(tmp_path):
+    from pathlib import Path
+
+    from neurofusion_qa.benchmark import (
+        BenchmarkJob,
+        run_benchmark_job,
+    )
+
+    config_path = Path("config/identityguard_protocol.yaml")
+    output_root = tmp_path / "benchmark"
+
+    job = BenchmarkJob(
+        experiment_id="resume_valid_C4",
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+        corruption="C4_cross_modal_permutation",
+        severity=0.01,
+        affected_count=1,
+        seed=0,
+    )
+
+    first = run_benchmark_job(
+        job,
+        output_root=output_root,
+        config_path=config_path,
+        resume=False,
+    )
+
+    second = run_benchmark_job(
+        job,
+        output_root=output_root,
+        config_path=config_path,
+        resume=True,
+    )
+
+    assert first.job_directory == second.job_directory
+    assert first.output_hashes == second.output_hashes
+    assert first.detection == second.detection
+    assert second.completed is True
+
+
+def test_resume_rejects_completion_marker_with_missing_output_hash(tmp_path):
+    import json
+    from pathlib import Path
+
+    from neurofusion_qa.benchmark import (
+        BenchmarkJob,
+        run_benchmark_job,
+    )
+
+    config_path = Path("config/identityguard_protocol.yaml")
+    output_root = tmp_path / "benchmark"
+
+    job = BenchmarkJob(
+        experiment_id="resume_incomplete_marker_C4",
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+        corruption="C4_cross_modal_permutation",
+        severity=0.01,
+        affected_count=1,
+        seed=0,
+    )
+
+    first = run_benchmark_job(
+        job,
+        output_root=output_root,
+        config_path=config_path,
+        resume=False,
+    )
+
+    job_dir = Path(first.job_directory)
+    marker_path = job_dir / "completed.json"
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+
+    marker["output_hashes"].pop("metrics.json")
+    marker_path.write_text(
+        json.dumps(marker, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="not a valid completed job"):
+        run_benchmark_job(
+            job,
+            output_root=output_root,
+            config_path=config_path,
+            resume=True,
+        )
+
+
+def test_synthetic_cross_modal_join_checks_support_three_modalities():
+    from neurofusion_qa.benchmark import (
+        build_synthetic_cross_modal_join_checks,
+    )
+
+    records = build_synthetic_manifest(
+        people=16,
+        modalities=3,
+        sessions=1,
+        runs_per_modality=1,
+    )
+
+    checks = build_synthetic_cross_modal_join_checks(records)
+
+    assert len(checks) == 3
+    for check in checks:
+        assert check["relation"] == "one_to_one"
+        assert set(check["left_counts"]) == set(check["right_counts"])
+        assert set(check["left_counts"].values()) == {1}
+        assert set(check["right_counts"].values()) == {1}
+
+
+def test_code_provenance_records_commit_status_and_source_hash():
+    from neurofusion_qa.benchmark import _code_provenance
+
+    provenance = _code_provenance()
+    fields = dict(
+        line.split("=", 1)
+        for line in provenance.splitlines()
+    )
+
+    assert fields["git_commit"]
+    assert fields["working_tree_status"] in {
+        "clean",
+        "dirty",
+        "unknown",
+    }
+    assert len(fields["python_source_tree_sha256"]) == 64
+    assert all(
+        char in "0123456789abcdef"
+        for char in fields["python_source_tree_sha256"]
+    )
+
+
+def test_metrics_include_reproducibility_provenance(tmp_path):
+    import hashlib
+    import json
+    from pathlib import Path
+
+    from neurofusion_qa.benchmark import (
+        BenchmarkJob,
+        run_benchmark_job,
+    )
+
+    config_path = Path("config/identityguard_protocol.yaml")
+
+    job = BenchmarkJob(
+        experiment_id="test_metrics_provenance",
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+        corruption="C2_canonicalization_collision",
+        severity=0.01,
+        affected_count=1,
+        seed=20270915,
+    )
+
+    result = run_benchmark_job(
+        job,
+        output_root=tmp_path / "benchmark",
+        config_path=config_path,
+        resume=False,
+    )
+
+    job_directory = Path(result.job_directory)
+
+    metrics = json.loads(
+        (job_directory / "metrics.json").read_text(encoding="utf-8")
+    )
+    provenance = dict(
+        line.split("=", 1)
+        for line in (job_directory / "git_commit.txt")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+
+    assert metrics["parent_manifest_sha256"] == (
+        job_directory / "parent_manifest.sha256"
+    ).read_text(encoding="utf-8").strip()
+
+    assert metrics["config_sha256"] == hashlib.sha256(
+        (job_directory / "config.snapshot.yaml").read_bytes()
+    ).hexdigest()
+
+    assert metrics["git_commit"] == provenance["git_commit"]
+    assert metrics["working_tree_status"] == provenance["working_tree_status"]
+    assert metrics["python_source_tree_sha256"] == (
+        provenance["python_source_tree_sha256"]
+    )
+
+    assert metrics["rule_outputs"] == json.loads(
+        (job_directory / "audit_report.json").read_text(encoding="utf-8")
+    )
