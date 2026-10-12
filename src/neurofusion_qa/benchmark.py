@@ -1172,14 +1172,59 @@ def run_benchmark_job(
                 metrics_payload,
             )
 
+            stdout_log = [
+                "IdentityGuard-BIDS benchmark job",
+                f"experiment_id={job.experiment_id}",
+                "status=COMPLETED",
+                f"people={job.people}",
+                f"modalities={job.modalities}",
+                f"sessions={job.sessions}",
+                f"runs_per_modality={job.runs_per_modality}",
+                f"corruption={job.corruption}",
+                f"severity={job.severity}",
+                f"affected_count={job.affected_count}",
+                f"seed={job.seed}",
+                f"parent_manifest_sha256={parent_manifest_sha256}",
+                f"manifest_sha256={manifest_hash}",
+                f"findings_count={len(report.findings)}",
+                f"detected={evaluation.detected}",
+                (
+                    "expected_violation_detected="
+                    f"{evaluation.expected_violation_detected}"
+                ),
+                (
+                    "expected_violation_count="
+                    f"{evaluation.expected_violation_count}"
+                ),
+                (
+                    "detected_expected_violation_count="
+                    f"{evaluation.detected_expected_violation_count}"
+                ),
+                f"affected_key_count={evaluation.affected_key_count}",
+                f"localized_key_count={evaluation.localized_key_count}",
+                (
+                    "localization_true_positives="
+                    f"{evaluation.localization_true_positives}"
+                ),
+                (
+                    "localization_false_positives="
+                    f"{evaluation.localization_false_positives}"
+                ),
+                f"failure_type_correct={evaluation.failure_type_correct}",
+                f"runtime_seconds={runtime_seconds:.9f}",
+                f"peak_memory_bytes={peak_memory_bytes}",
+            ]
+
             _write_text(
                 temp_dir / "stdout.log",
-                "",
+                "\n".join(stdout_log) + "\n",
             )
             _write_text(
                 temp_dir / "stderr.log",
                 "",
             )
+
+
 
             # 8. Hash all required outputs.
             output_names = BENCHMARK_OUTPUT_NAMES
