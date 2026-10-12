@@ -515,6 +515,7 @@ def inject_corruption(
     Inject one documented corruption into a clean manifest.
 
     Currently implemented:
+        C0_clean
         C1_namespace_stripping
         C2_canonicalization_collision
         C3_duplicate_propagation
@@ -526,6 +527,14 @@ def inject_corruption(
     """
 
     clean_records = list(records)
+
+    if corruption == "C0_clean":
+        return clean_records, {
+            "corruption": "C0_clean",
+            "operations": [],
+            "expected_violations": [],
+            "affected_keys": [],
+        }
 
     if corruption == "C1_namespace_stripping":
         return _inject_c1_namespace_stripping(

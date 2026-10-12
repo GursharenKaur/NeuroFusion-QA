@@ -1157,3 +1157,59 @@ def test_metrics_include_reproducibility_provenance(tmp_path):
     assert metrics["rule_outputs"] == json.loads(
         (job_directory / "audit_report.json").read_text(encoding="utf-8")
     )
+
+
+def test_c0_clean_control_benchmark_job(tmp_path):
+    from pathlib import Path
+    import json
+
+    from neurofusion_qa.benchmark import (
+        BenchmarkJob,
+        run_benchmark_job,
+    )
+
+    job = BenchmarkJob(
+        experiment_id="smoke_C0_clean",
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+        corruption="C0_clean",
+        severity=0.0,
+        affected_count=0,
+        seed=7,
+    )
+
+    result = run_benchmark_job(
+        job,
+        output_root=tmp_path / "benchmark",
+        config_path=Path("config/identityguard_protocol.yaml"),
+        resume=False,
+    )
+
+    job_dir = Path(result.job_directory)
+    truth = json.loads(
+        (job_dir / "truth.json").read_text(encoding="utf-8")
+    )
+    report = json.loads(
+        (job_dir / "audit_report.json").read_text(encoding="utf-8")
+    )
+    metrics = json.loads(
+        (job_dir / "metrics.json").read_text(encoding="utf-8")
+    )
+
+    assert truth["corruption"] == "C0_clean"
+    assert truth["operations"] == []
+    assert truth["expected_violations"] == []
+    assert truth["affected_keys"] == []
+
+    assert report["summary"]["errors"] == 0
+    assert report["summary"]["warnings"] == 0
+    assert report["summary"]["infos"] == 0
+
+    assert metrics["detection"]["detected"] is False
+    assert metrics["detection"]["expected_violation_detected"] is False
+    assert metrics["detection"]["localization_true_positives"] == 0
+    assert metrics["detection"]["localization_false_positives"] == 0
+
+    assert (job_dir / "completed.json").is_file()
