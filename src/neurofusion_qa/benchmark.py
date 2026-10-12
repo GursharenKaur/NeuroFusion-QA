@@ -1029,6 +1029,17 @@ def run_benchmark_job(
             cross_modal_pairs = None
             metrics = None
             populations = None
+
+            if job.corruption == "C0_clean":
+                join_checks = build_synthetic_cross_modal_join_checks(
+                    clean_records
+                )
+                cross_modal_pairs = build_synthetic_cross_modal_pairs(
+                    clean_records
+                )
+                metrics, populations = build_synthetic_metric_evidence(
+                    clean_records
+                )
             if job.corruption == "C2_canonicalization_collision":
                 join_checks = build_synthetic_cross_modal_join_checks(
                     corrupted_records
