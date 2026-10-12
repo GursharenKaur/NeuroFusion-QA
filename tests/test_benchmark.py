@@ -320,6 +320,73 @@ def test_benchmark_evaluation_localizes_identity_changing_corruption():
     assert evaluation.localization_false_positives == 0
     assert evaluation.failure_type_correct is True
 
+def test_operation_evidence_does_not_credit_unmatched_affected_keys():
+    affected_key_1 = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00010",
+    )
+    affected_key_2 = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00020",
+    )
+
+    corrupted_key_1 = (
+        None,
+        "1.0",
+        "sub-00010",
+    )
+
+    findings = [
+        Finding(
+            rule_id="I1.namespace_completeness",
+            severity="ERROR",
+            message="Missing namespace.",
+            key_type="person_key",
+            affected_keys=(corrupted_key_1,),
+            expected="present",
+            observed=None,
+            evidence_rows=(
+                {
+                    "row_index": 18,
+                    "missing_fields": ("dataset_namespace",),
+                },
+            ),
+            remediation="Restore dataset namespace.",
+        )
+    ]
+
+    truth = {
+        "corruption": "C1_namespace_stripping",
+        "operations": [
+            {
+                "operation": "remove_dataset_namespace",
+                "row_index": 18,
+                "affected_person_key": affected_key_1,
+            },
+            {
+                "operation": "remove_dataset_namespace",
+                "row_index": 29,
+                "affected_person_key": affected_key_2,
+            },
+        ],
+        "expected_violations": [
+            "I1.namespace_completeness",
+        ],
+        "affected_keys": [
+            affected_key_1,
+            affected_key_2,
+        ],
+    }
+
+    evaluation = evaluate_benchmark_findings(findings, truth)
+
+    assert evaluation.affected_key_count == 2
+    assert evaluation.localization_true_positives == 1
+    assert evaluation.localization_false_positives == 0
+    assert evaluation.localized_key_count == 1
+
 def test_synthetic_cross_modal_join_check_is_one_to_one():
     records = build_synthetic_manifest(
         people=4,
@@ -532,6 +599,39 @@ def test_c4_produces_i3_person_pairing_finding():
     assert evaluation.detected is True
     assert evaluation.expected_violation_detected is True
     assert evaluation.failure_type_correct is True
+
+
+def test_c4_empty_findings_do_not_receive_localization_credit():
+    affected_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00001",
+    )
+
+    truth = {
+        "corruption": "C4_cross_modal_permutation",
+        "affected_keys": [affected_key],
+        "operations": [
+            {
+                "operation": "reassign_modality_record_to_other_participant",
+                "original_person_key": affected_key,
+                "new_person_key": (
+                    "synthetic:identityguard",
+                    "1.0",
+                    "sub-00002",
+                ),
+            }
+        ],
+        "expected_violations": ["I3.person_pairing"],
+    }
+
+    evaluation = evaluate_benchmark_findings([], truth)
+
+    assert evaluation.detected is False
+    assert evaluation.localization_true_positives == 0
+    assert evaluation.localization_false_positives == 0
+    assert evaluation.localized_key_count == 0
+
 
 def test_c5_produces_i5_person_split_leakage_finding():
     clean_records = build_synthetic_manifest(

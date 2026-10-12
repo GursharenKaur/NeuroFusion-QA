@@ -207,15 +207,18 @@ def evaluate_benchmark_findings(
     corruption = truth.get("corruption")
 
     if corruption == "C4_cross_modal_permutation":
-        # C4 truth identifies the original source person.
-        # The destination person is involved in the pair but is
-        # not the injected corruption target.
+        # Credit C4 localization only when a detector finding actually
+        # contains the affected source person. Pair ordering is not
+        # assumed to identify the original source.
         localized_keys = {
-            _freeze_key(operation["original_person_key"])
-            for operation in truth.get("operations", [])
-            if operation.get("operation")
-            == "reassign_modality_record_to_other_participant"
-            and operation.get("original_person_key") is not None
+            _freeze_key(key)
+            for finding in findings
+            if finding.rule_id == "I3.person_pairing"
+            and finding.key_type == "cross_modal_pair"
+            for pair in finding.affected_keys
+            if isinstance(pair, (tuple, list)) and len(pair) == 2
+            for key in pair
+            if _freeze_key(key) in affected_keys
         }
 
     elif corruption == "C3_duplicate_propagation":
@@ -251,45 +254,46 @@ def evaluate_benchmark_findings(
 
     true_positive_keys = localized_keys & affected_keys
 
-    # Some corruptions intentionally modify identity-bearing fields.
-    # In those cases the detector's observed key may differ from the
-    # clean affected key stored in hidden truth. Use the corruption
-    # operation's row-level evidence to establish correspondence.
-    operation_rows = {
-        operation["row_index"]
-        for operation in truth.get("operations", [])
-        if "row_index" in operation
-    }
-
-    operation_target_rows = {
-        operation["target_row_index"]
-        for operation in truth.get("operations", [])
-        if "target_row_index" in operation
-    }
-
+    # Match evidence to individual corruption operations, not the entire
+    # set of affected keys. The truth generator records affected keys in
+    # the same order as operations.
     localized_operation_keys = set()
     operation_matched_observed_keys = set()
 
-    for finding in findings:
-        evidence_rows = {
-            evidence.get("row_index")
-            for evidence in finding.evidence_rows
-            if isinstance(evidence, dict)
+    operations = truth.get("operations", [])
+
+    for operation_index, operation in enumerate(operations):
+        operation_rows = {
+            operation[field]
+            for field in ("row_index", "target_row_index")
+            if field in operation
         }
 
-        operation_match = (
-            bool(evidence_rows & operation_rows)
-            or bool(evidence_rows & operation_target_rows)
-        )
+        if not operation_rows:
+            continue
 
-        if operation_match:
-            # The finding corresponds to a corruption operation whose clean
-            # affected key is stored separately in hidden truth.
-            localized_operation_keys.update(affected_keys)
+        matched_findings = [
+            finding
+            for finding in findings
+            if any(
+                isinstance(evidence, dict)
+                and evidence.get("row_index") in operation_rows
+                for evidence in finding.evidence_rows
+            )
+        ]
 
-            # The observed detector keys are not false positives because
-            # operation evidence establishes their correspondence to the
-            # clean affected key.
+        if not matched_findings:
+            continue
+
+        # Attribute this operation only to its corresponding clean key.
+        if operation_index < len(truth.get("affected_keys", [])):
+            localized_operation_keys.add(
+                _freeze_key(truth["affected_keys"][operation_index])
+            )
+
+        # The finding's observed key is accounted for by the matched
+        # operation, even if an identity-bearing field was corrupted.
+        for finding in matched_findings:
             operation_matched_observed_keys.update(
                 _freeze_key(key)
                 for key in finding.affected_keys
