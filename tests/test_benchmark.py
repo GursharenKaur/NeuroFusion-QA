@@ -1213,3 +1213,126 @@ def test_c0_clean_control_benchmark_job(tmp_path):
     assert metrics["detection"]["localization_false_positives"] == 0
 
     assert (job_dir / "completed.json").is_file()
+
+
+def test_benchmark_writes_baselines_artifact_and_hash(tmp_path):
+    import json
+    from pathlib import Path
+
+    from neurofusion_qa.benchmark import BenchmarkJob, run_benchmark_job
+
+    job = BenchmarkJob(
+        experiment_id="baseline_artifact_C4",
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+        corruption="C4_cross_modal_permutation",
+        severity=0.01,
+        affected_count=1,
+        seed=0,
+    )
+
+    result = run_benchmark_job(
+        job,
+        output_root=tmp_path / "benchmark",
+        config_path=Path("config/identityguard_protocol.yaml"),
+        resume=False,
+    )
+
+    job_dir = Path(result.job_directory)
+    artifact_path = job_dir / "baselines.json"
+    marker = json.loads(
+        (job_dir / "completed.json").read_text(encoding="utf-8")
+    )
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+
+    assert artifact_path.is_file()
+    assert "baselines.json" in result.output_hashes
+    assert marker["output_hashes"]["baselines.json"] == (
+        result.output_hashes["baselines.json"]
+    )
+    assert payload["scope"] == "manifest_row_baselines"
+    assert payload["applicable"] is True
+    assert payload["bids_validation"]["status"] == "not_run"
+    assert "basic_duplicate_check" in payload["results"]
+    assert "naive_join" in payload["results"]
+
+
+def test_c6_baselines_are_not_applicable(tmp_path):
+    import json
+    from pathlib import Path
+
+    from neurofusion_qa.benchmark import BenchmarkJob, run_benchmark_job
+
+    job = BenchmarkJob(
+        experiment_id="baseline_artifact_C6",
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+        corruption="C6_denominator_mismatch",
+        severity=0.01,
+        affected_count=1,
+        seed=0,
+    )
+
+    result = run_benchmark_job(
+        job,
+        output_root=tmp_path / "benchmark",
+        config_path=Path("config/identityguard_protocol.yaml"),
+        resume=False,
+    )
+
+    payload = json.loads(
+        (Path(result.job_directory) / "baselines.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert payload["applicable"] is False
+    assert payload["results"] == {}
+    assert "denominators" in payload["reason"]
+
+
+def test_resume_rejects_tampered_baselines_artifact(tmp_path):
+    from pathlib import Path
+
+    from neurofusion_qa.benchmark import BenchmarkJob, run_benchmark_job
+
+    job = BenchmarkJob(
+        experiment_id="resume_tampered_baselines_C4",
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+        corruption="C4_cross_modal_permutation",
+        severity=0.01,
+        affected_count=1,
+        seed=0,
+    )
+
+    result = run_benchmark_job(
+        job,
+        output_root=tmp_path / "benchmark",
+        config_path=Path("config/identityguard_protocol.yaml"),
+        resume=False,
+    )
+
+    artifact_path = Path(result.job_directory) / "baselines.json"
+    original_bytes = artifact_path.read_bytes()
+
+    try:
+        artifact_path.write_bytes(original_bytes + b"\n")
+
+        with pytest.raises(RuntimeError, match="not a valid completed job"):
+            run_benchmark_job(
+                job,
+                output_root=tmp_path / "benchmark",
+                config_path=Path("config/identityguard_protocol.yaml"),
+                resume=True,
+            )
+
+        assert artifact_path.read_bytes() == original_bytes + b"\n"
+    finally:
+        artifact_path.write_bytes(original_bytes)

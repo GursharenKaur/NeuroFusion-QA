@@ -10,6 +10,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Iterable
 
+from .baselines import basic_duplicate_check, naive_inner_join
+
 from .identity import (
     Finding,
     canonicalize_participant_id,
@@ -910,6 +912,7 @@ BENCHMARK_OUTPUT_NAMES = (
     "metrics.json",
     "stdout.log",
     "stderr.log",
+    "baselines.json",
 )
 
 def run_benchmark_job(
@@ -1074,7 +1077,84 @@ def run_benchmark_job(
                 metrics = corrupted_records
                 populations = clean_populations
                 corrupted_records = clean_records
+            # 4b. Run simple comparison baselines without hidden truth.
+            # C6 changes metric evidence, not manifest rows, so row-only
+            # baselines are not applicable to that corruption.
+            if job.corruption == "C6_denominator_mismatch":
+                baselines_payload = {
+                    "scope": "manifest_row_baselines",
+                    "applicable": False,
+                    "reason": (
+                        "C6 changes metric denominators, not manifest rows."
+                    ),
+                    "results": {},
+                    "bids_validation": {
+                        "status": "not_run",
+                        "reason": (
+                            "No BIDS Validator result was produced for this job."
+                        ),
+                    },
+                }
+            else:
+                duplicate_result = basic_duplicate_check(corrupted_records)
 
+                modalities_in_order = list(
+                    dict.fromkeys(
+                        record.modality for record in corrupted_records
+                    )
+                )
+
+                if len(modalities_in_order) >= 2:
+                    left_modality, right_modality = modalities_in_order[:2]
+
+                    left_records = [
+                        record for record in corrupted_records
+                        if record.modality == left_modality
+                    ]
+                    right_records = [
+                        record for record in corrupted_records
+                        if record.modality == right_modality
+                    ]
+
+                    join_result = naive_inner_join(
+                        left_records,
+                        right_records,
+                    )
+
+                    join_payload = {
+                        "baseline": join_result.baseline,
+                        "detected": join_result.detected,
+                        "details": join_result.details,
+                        "left_modality": left_modality,
+                        "right_modality": right_modality,
+                    }
+                else:
+                    join_payload = {
+                        "baseline": "naive_join",
+                        "status": "not_applicable",
+                        "reason": (
+                            "At least two distinct modalities are required."
+                        ),
+                    }
+
+                baselines_payload = {
+                    "scope": "manifest_row_baselines",
+                    "applicable": True,
+                    "results": {
+                        "basic_duplicate_check": {
+                            "baseline": duplicate_result.baseline,
+                            "detected": duplicate_result.detected,
+                            "details": duplicate_result.details,
+                        },
+                        "naive_join": join_payload,
+                    },
+                    "bids_validation": {
+                        "status": "not_run",
+                        "reason": (
+                            "No BIDS Validator result was produced for this job."
+                        ),
+                    },
+                }
             # 5. Run the IdentityGuard audit.
             manifest_hash = _manifest_records_sha256(corrupted_records)
 
@@ -1170,6 +1250,11 @@ def run_benchmark_job(
             _write_json(
                 temp_dir / "metrics.json",
                 metrics_payload,
+            )
+
+            _write_json(
+                temp_dir / "baselines.json",
+                baselines_payload,
             )
 
             stdout_log = [
