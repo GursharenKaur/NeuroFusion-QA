@@ -327,6 +327,102 @@ def evaluate_benchmark_findings(
         failure_type_correct=failure_type_correct,
     )
 
+
+def evaluate_baseline_predictions(
+    baselines: dict[str, Any],
+    truth: dict[str, Any],
+) -> dict[str, Any]:
+    """Score declared baseline alerts separately from hidden truth."""
+    corruption = truth.get("corruption")
+    expected_violations = set(truth.get("expected_violations", []))
+    clean_control = corruption == "C0_clean"
+
+    if not baselines.get("applicable", False):
+        return {
+            "corruption": corruption,
+            "status": "not_applicable",
+            "reason": baselines.get("reason", "Baselines are not applicable."),
+            "scored_baseline_count": 0,
+            "results": {},
+        }
+
+    results: dict[str, Any] = {}
+
+    # Exact duplicate check: its declared alert maps only to I4.repeated_row.
+    duplicate = baselines.get("results", {}).get("basic_duplicate_check")
+    if duplicate is not None:
+        expected_for_baseline = {"I4.repeated_row"}
+        expected_present = bool(expected_violations & expected_for_baseline)
+        predicted = bool(duplicate.get("detected", False))
+
+        results["basic_duplicate_check"] = {
+            "status": "scored",
+            "alert": predicted,
+            "expected_violation": expected_present,
+            "true_positive": predicted and expected_present,
+            "false_positive": predicted and not expected_present,
+            "false_negative": expected_present and not predicted,
+            "true_negative": not expected_present and not predicted,
+            "expected_violation_types": sorted(
+                expected_violations & expected_for_baseline
+            ),
+            "mapping": ["I4.repeated_row"],
+        }
+
+    # The naive join emits statistics but no validation alert.
+    join = baselines.get("results", {}).get("naive_join")
+    if join is not None:
+        results["naive_join"] = {
+            "status": "not_scored",
+            "reason": (
+                "The naive join reports join statistics but does not emit "
+                "a validation alert under the documented convention."
+            ),
+            "descriptive_statistics": join.get("details", {}),
+        }
+
+    # No validator output means no BIDS-baseline prediction exists.
+    bids = baselines.get("bids_validation", {"status": "not_run"})
+    results["bids_validation"] = {
+        "status": (
+            "not_scored"
+            if bids.get("status") in {"not_run", "not_applicable"}
+            else "requires_review"
+        ),
+        "reason": bids.get("reason", "Validator output requires review."),
+        "validator_status": bids.get("status", "unknown"),
+    }
+
+    scored = [
+        value for value in results.values()
+        if value.get("status") == "scored"
+    ]
+
+    # Clean false alarms are meaningful only for a clean control.
+    clean_false_alarms = (
+        sum(bool(value["false_positive"]) for value in scored)
+        if clean_control
+        else None
+    )
+
+    return {
+        "corruption": corruption,
+        "status": "evaluated",
+        "clean_control": clean_control,
+        "scored_baseline_count": len(scored),
+        "clean_false_alarm_count": clean_false_alarms,
+        "clean_false_alarm_denominator": len(scored) if clean_control else None,
+        "results": results,
+        "evaluation_scope": (
+            "Baseline-specific alert scoring; not protocol-wide "
+            "corruption-instance detection sensitivity."
+        ),
+        "clean_false_alarm_scope": (
+            "Scored baseline-specific predictions on C0_clean only."
+        ),
+    }
+
+
 def _freeze_key(value: Any) -> Any:
     if isinstance(value, list):
         return tuple(_freeze_key(item) for item in value)
@@ -913,6 +1009,7 @@ BENCHMARK_OUTPUT_NAMES = (
     "stdout.log",
     "stderr.log",
     "baselines.json",
+    "baseline_evaluation.json",
 )
 
 def run_benchmark_job(
@@ -1255,6 +1352,16 @@ def run_benchmark_job(
             _write_json(
                 temp_dir / "baselines.json",
                 baselines_payload,
+            )
+
+            baseline_evaluation_payload = evaluate_baseline_predictions(
+                baselines_payload,
+                truth,
+            )
+
+            _write_json(
+                temp_dir / "baseline_evaluation.json",
+                baseline_evaluation_payload,
             )
 
             stdout_log = [

@@ -105,3 +105,18 @@ Copy this block for every scientific, data, model, authorship, or submission dec
 - **Evidence:** `docs/IDENTITYGUARD_METHOD.md`; commits `763b324` (C2, 2026-10-06), `82df22e` (C3, 2026-10-07), `81ecb03` (C4, 2026-10-07), `f85f23f` (C1–C6 implementation checkpoint, 2026-10-07), and `5bf7ef7` (reproducible executor, 2026-10-09).
 - **Scope:** High-level summary of synthetic benchmark representation and C1–C6 generation conventions. This entry does not replace D-002 or the protocol's specified benchmark grid, and it does not authorize the full experiment run.
 - **Approval:** PI approval pending.
+
+### D-009 - Baseline prediction and scoring convention
+
+- **Decision date:** 2026-10-13.
+- **Decision status:** Student implementation convention; PI approval pending.
+- **Protocol basis:** The protocol defines three comparison baselines: a naive inner join on raw `participant_id` without validation, an exact-full-row duplicate check, and a dataset-level BIDS-valid metadata assumption without cross-dataset/join/split provenance checks. The protocol requires instance-level detection sensitivity and clean false-alarm rate, with explicit numerators and denominators.
+- **Convention selected:** Keep baseline predictions separate from hidden-truth evaluation. `baselines.json` records observable baseline outputs; a separate `baseline_evaluation.json` records truth-based scores. The naive join reports join statistics but does not alert, so those statistics alone receive no detection credit. An exact-full-row duplicate alert is mapped to `I4.repeated_row` for primary-violation scoring. The BIDS-validation baseline is `not_run` until an actual validator result is supplied. Row-only baselines are `not_applicable` for C6.
+- **Rationale:** Prevent evaluation from leaking hidden truth into baseline predictions, avoid crediting descriptive statistics as alerts, and keep unavailable or inapplicable baselines out of scored denominators.
+- **Alternatives considered:** Treat changed join statistics as an alert; score an unavailable BIDS-validation result as a negative prediction; combine prediction and evaluation in one artifact.
+- **Evidence available at decision time:** The benchmark evaluator receives hidden truth separately from detector findings. The current baseline artifact records duplicate-check and naive-join outputs, while BIDS validation is marked `not_run`. The protocol specifies the baseline definitions and instance-level endpoints.
+- **Made before or after seeing affected results:** After observing the six-job baseline integration smoke run; before implementing this scoring convention and before full-grid evaluation.
+- **Effect on protocol/interpretation:** This is an explicit scoring convention, not a change to the protocol's corruption definitions. Duplicate-check credit is limited to the declared `I4.repeated_row` mapping. Naive-join statistics remain descriptive unless a separate alert rule is prospectively defined. `not_run` and `not_applicable` results are excluded from scored denominators. Full-grid results remain gated on required approval.
+- **Files/configs changed:** `templates/DECISION_LOG.md`; planned evaluator and tests in `src/neurofusion_qa/benchmark.py` and `tests/`.
+- **Owner and due date:** Student maintainer; before the full benchmark grid.
+- **PI approval:** Pending.

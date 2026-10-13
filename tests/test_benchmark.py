@@ -1247,6 +1247,12 @@ def test_benchmark_writes_baselines_artifact_and_hash(tmp_path):
     )
     payload = json.loads(artifact_path.read_text(encoding="utf-8"))
 
+    evaluation_path = job_dir / "baseline_evaluation.json"
+
+    evaluation_marker = json.loads(
+        evaluation_path.read_text(encoding="utf-8")
+    )
+
     assert artifact_path.is_file()
     assert "baselines.json" in result.output_hashes
     assert marker["output_hashes"]["baselines.json"] == (
@@ -1257,7 +1263,16 @@ def test_benchmark_writes_baselines_artifact_and_hash(tmp_path):
     assert payload["bids_validation"]["status"] == "not_run"
     assert "basic_duplicate_check" in payload["results"]
     assert "naive_join" in payload["results"]
-
+    assert evaluation_path.is_file()
+    assert "baseline_evaluation.json" in result.output_hashes
+    assert marker["output_hashes"]["baseline_evaluation.json"] == (
+        result.output_hashes["baseline_evaluation.json"]
+    )
+    assert evaluation_marker["status"] == "evaluated"
+    assert evaluation_marker["corruption"] == "C4_cross_modal_permutation"
+    assert "Baseline-specific alert scoring" in (
+        evaluation_marker["evaluation_scope"]
+    )
 
 def test_c6_baselines_are_not_applicable(tmp_path):
     import json
@@ -1294,6 +1309,47 @@ def test_c6_baselines_are_not_applicable(tmp_path):
     assert payload["results"] == {}
     assert "denominators" in payload["reason"]
 
+def test_resume_rejects_tampered_baseline_evaluation_artifact(tmp_path):
+    from pathlib import Path
+
+    from neurofusion_qa.benchmark import BenchmarkJob, run_benchmark_job
+
+    job = BenchmarkJob(
+        experiment_id="resume_tampered_baseline_evaluation_C4",
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+        corruption="C4_cross_modal_permutation",
+        severity=0.01,
+        affected_count=1,
+        seed=0,
+    )
+
+    result = run_benchmark_job(
+        job,
+        output_root=tmp_path / "benchmark",
+        config_path=Path("config/identityguard_protocol.yaml"),
+        resume=False,
+    )
+
+    artifact_path = (
+        Path(result.job_directory) / "baseline_evaluation.json"
+    )
+    original_bytes = artifact_path.read_bytes()
+
+    try:
+        artifact_path.write_bytes(original_bytes + b"\n")
+
+        with pytest.raises(RuntimeError, match="not a valid completed job"):
+            run_benchmark_job(
+                job,
+                output_root=tmp_path / "benchmark",
+                config_path=Path("config/identityguard_protocol.yaml"),
+                resume=True,
+            )
+    finally:
+        artifact_path.write_bytes(original_bytes)
 
 def test_resume_rejects_tampered_baselines_artifact(tmp_path):
     from pathlib import Path
@@ -1336,3 +1392,40 @@ def test_resume_rejects_tampered_baselines_artifact(tmp_path):
         assert artifact_path.read_bytes() == original_bytes + b"\n"
     finally:
         artifact_path.write_bytes(original_bytes)
+
+
+def test_baseline_evaluation_keeps_unavailable_baselines_unscored():
+    from neurofusion_qa.benchmark import evaluate_baseline_predictions
+
+    baselines = {
+        "applicable": True,
+        "results": {
+            "basic_duplicate_check": {"detected": False},
+            "naive_join": {
+                "detected": False,
+                "details": {"joined_rows": 4},
+            },
+        },
+        "bids_validation": {
+            "status": "not_run",
+            "reason": "No validator result exists.",
+        },
+    }
+    truth = {
+        "corruption": "C0_clean",
+        "expected_violations": [],
+        "affected_keys": [],
+        "operations": [],
+    }
+
+    result = evaluate_baseline_predictions(baselines, truth)
+
+    assert result["status"] == "evaluated"
+    assert result["clean_control"] is True
+    assert result["scored_baseline_count"] == 1
+    assert result["clean_false_alarm_count"] == 0
+    assert result["clean_false_alarm_denominator"] == 1
+    assert result["results"]["basic_duplicate_check"]["true_negative"] is True
+    assert result["results"]["naive_join"]["status"] == "not_scored"
+    assert result["results"]["bids_validation"]["status"] == "not_scored"
+    assert "C0_clean only" in result["clean_false_alarm_scope"]
