@@ -224,7 +224,8 @@ def evaluate_benchmark_findings(
         }
 
     elif corruption == "C3_duplicate_propagation":
-        # Localize the duplicated acquisition using direct I4 evidence.
+        # Localize duplicated acquisitions using direct I4 evidence
+        # with the expected acquisition-level key type.
         localized_keys = {
             _freeze_key(key)
             for finding in findings
@@ -232,6 +233,7 @@ def evaluate_benchmark_findings(
                 "I4.repeated_row",
                 "I4.repeated_source_path",
             }
+            and finding.key_type == "acquisition_key"
             for key in finding.affected_keys
         }
 
@@ -244,6 +246,19 @@ def evaluate_benchmark_findings(
             _freeze_key(key)
             for finding in findings
             if finding.key_type == "person_key"
+            for key in finding.affected_keys
+        }
+
+    elif corruption == "C6_denominator_mismatch":
+        # C6 localization requires direct denominator-mismatch
+        # evidence at the metric-population level.
+        localized_keys = {
+            _freeze_key(key)
+            for finding in findings
+            if (
+                finding.rule_id == "I6.denominator_mismatch"
+                and finding.key_type == "metric_population"
+            )
             for key in finding.affected_keys
         }
 
@@ -277,7 +292,26 @@ def evaluate_benchmark_findings(
         matched_findings = [
             finding
             for finding in findings
-            if any(
+            if (
+                (
+                    truth.get("corruption") != "C6_denominator_mismatch"
+                    or (
+                        finding.rule_id == "I6.denominator_mismatch"
+                        and finding.key_type == "metric_population"
+                    )
+                )
+                and (
+                    truth.get("corruption") != "C3_duplicate_propagation"
+                    or (
+                        finding.rule_id in {
+                            "I4.repeated_row",
+                            "I4.repeated_source_path",
+                        }
+                        and finding.key_type == "acquisition_key"
+                    )
+                )
+            )
+            and any(
                 isinstance(evidence, dict)
                 and evidence.get("row_index") in operation_rows
                 for evidence in finding.evidence_rows

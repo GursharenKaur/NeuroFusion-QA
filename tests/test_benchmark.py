@@ -559,6 +559,108 @@ def test_c3_produces_i2_i4_and_i6_benchmark_findings():
     assert evaluation.expected_violation_detected is True
     assert evaluation.failure_type_correct is True
 
+def test_c3_does_not_credit_wrong_key_type_for_i4_finding():
+    affected_acquisition_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00001",
+        "ses-01",
+        "mod-01",
+        "task-synthetic",
+        "acq-01",
+        "01",
+    )
+
+    unrelated_finding = Finding(
+        rule_id="I4.repeated_row",
+        severity="ERROR",
+        message="Repeated-row finding with unexpected key type.",
+        key_type="person_key",
+        affected_keys=[affected_acquisition_key],
+        expected="acquisition-level duplicate evidence",
+        observed="person-level key type",
+        evidence_rows=(
+            {
+                "row_index": 0,
+                "duplicate_row_index": 1,
+            },
+        ),
+        remediation="Inspect the duplicate evidence.",
+    )
+
+    truth = {
+        "corruption": "C3_duplicate_propagation",
+        "operations": [
+            {
+                "operation": "duplicate_row",
+                "row_index": 0,
+                "target_row_index": 1,
+            },
+        ],
+        "expected_violations": ["I4.repeated_row"],
+        "affected_keys": [affected_acquisition_key],
+    }
+
+    evaluation = evaluate_benchmark_findings(
+        [unrelated_finding],
+        truth,
+    )
+
+    assert evaluation.expected_violation_detected is True
+    assert evaluation.localization_true_positives == 0
+    assert evaluation.localization_false_positives == 0
+
+def test_c3_credits_valid_acquisition_key_for_i4_finding():
+    affected_acquisition_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00001",
+        "ses-01",
+        "mod-01",
+        "task-synthetic",
+        "acq-01",
+        "01",
+    )
+
+    valid_finding = Finding(
+        rule_id="I4.repeated_row",
+        severity="ERROR",
+        message="Repeated acquisition row detected.",
+        key_type="acquisition_key",
+        affected_keys=[affected_acquisition_key],
+        expected="unique acquisition rows",
+        observed="repeated acquisition row",
+        evidence_rows=(
+            {
+                "row_index": 0,
+                "duplicate_row_index": 1,
+            },
+        ),
+        remediation="Inspect the duplicate acquisition rows.",
+    )
+
+    truth = {
+        "corruption": "C3_duplicate_propagation",
+        "operations": [
+            {
+                "operation": "duplicate_row",
+                "row_index": 0,
+                "target_row_index": 1,
+            },
+        ],
+        "expected_violations": ["I4.repeated_row"],
+        "affected_keys": [affected_acquisition_key],
+    }
+
+    evaluation = evaluate_benchmark_findings(
+        [valid_finding],
+        truth,
+    )
+
+    assert evaluation.expected_violation_detected is True
+    assert evaluation.localization_true_positives == 1
+    assert evaluation.localization_false_positives == 0
+
 def test_c4_produces_i3_person_pairing_finding():
     clean_records = build_synthetic_manifest(
         people=16,
@@ -759,6 +861,55 @@ def test_c6_supports_multiple_affected_person_metrics():
     assert evaluation.localization_true_positives == 4
     assert evaluation.localization_false_positives == 0
     assert evaluation.failure_type_correct is True
+
+
+def test_c6_does_not_credit_unrelated_finding_by_operation_row():
+    population_key = "synthetic_population_01"
+
+    unrelated_finding = Finding(
+        rule_id="I1.namespace_completeness",
+        severity="ERROR",
+        message="Unrelated identity finding.",
+        key_type="person_key",
+        affected_keys=[population_key],
+        expected="complete identity",
+        observed="unrelated issue",
+        evidence_rows=(
+            {
+                "row_index": 0,
+            },
+        ),
+        remediation="Resolve the unrelated identity issue.",
+    )
+
+    truth = {
+        "corruption": "C6_denominator_mismatch",
+        "operations": [
+            {
+                "operation": "change_metric_denominator",
+                "metric_index": 0,
+                "metric_name": "accuracy",
+                "population_key": population_key,
+            },
+        ],
+        "expected_violations": [
+            "I6.denominator_mismatch",
+        ],
+        "affected_keys": [population_key],
+    }
+
+    evaluation = evaluate_benchmark_findings(
+        [unrelated_finding],
+        truth,
+    )
+
+    assert evaluation.detected is True
+    assert evaluation.expected_violation_detected is False
+    assert evaluation.localization_true_positives == 0
+    assert evaluation.localization_false_positives == 0
+    assert evaluation.localized_key_count == 0
+    assert evaluation.failure_type_correct is False
+
 
 def test_affected_count_for_severity_16_people():
     assert affected_count_for_severity(16, 0.01) == 1

@@ -120,3 +120,35 @@ Copy this block for every scientific, data, model, authorship, or submission dec
 - **Files/configs changed:** `templates/DECISION_LOG.md`; planned evaluator and tests in `src/neurofusion_qa/benchmark.py` and `tests/`.
 - **Owner and due date:** Student maintainer; before the full benchmark grid.
 - **PI approval:** Pending.
+
+### D-010 - C6 evaluator localization convention
+
+- **Decision date:** 2026-10-14.
+- **Decision status:** Student implementation convention; PI approval pending.
+- **Protocol basis:** The protocol requires corruption-instance detection and localization evaluation, but the available protocol text does not specify the exact evaluator matching rule for C6 denominator-mismatch operations.
+- **Convention implemented:** For `C6_denominator_mismatch`, localization credit is restricted to findings with `rule_id="I6.denominator_mismatch"` and `key_type="metric_population"`. Operation-row matching applies the same rule and key-type restriction. Other corruption types retain their existing localization behavior.
+- **Rationale:** Prevent an unrelated finding from receiving C6 localization credit merely because its affected key or evidence-row index matches a corrupted metric population.
+- **Alternatives considered:** Retain unrestricted key matching; restrict only operation-row matching; restrict both direct localization and operation-row matching for C6.
+- **Evidence available at decision time:** The C6 truth generator records the affected `population_key` for each denominator modification. The I6 checker emits `I6.denominator_mismatch` findings with `key_type="metric_population"` and the corresponding population key. A regression test reproduced the defect: an unrelated `I1.namespace_completeness` finding received one localization true positive through the previous evaluator.
+- **Made before or after seeing affected results:** The correction was made after observing the failing regression test and before any full-grid evaluation.
+- **Effect on protocol/interpretation:** This is an evaluator implementation convention, not a change to the corruption definitions or benchmark grid. C6 localization measures localization of the expected denominator-mismatch finding. Unrelated findings excluded by this filter do not contribute to C6 localization false-positive counts; therefore, that count must not be interpreted as the total number of unrelated detector findings. The correction does not establish that localization scoring is fully validated for C1–C5.
+- **Validation evidence:** `python -m py_compile .\src\neurofusion_qa\benchmark.py` completed successfully. `python -m pytest .\tests\test_benchmark.py -k "c6_does_not_credit_unrelated_finding_by_operation_row" -q`: 1 passed. `python -m pytest .\tests\test_benchmark.py -k "c6" -q`: 4 passed. `python -m pytest .\tests\test_benchmark.py -q`: 42 passed.
+- **Files changed:** `src/neurofusion_qa/benchmark.py`, `tests/test_benchmark.py`; documentation entry proposed for `templates/DECISION_LOG.md`.
+- **Owner and due date:** Student maintainer; before the full benchmark grid.
+- **PI approval:** Pending.
+
+### D-011 - C3 evaluator localization convention
+
+- **Decision date:** 2026-10-14.
+- **Decision status:** Student implementation convention; PI approval pending.
+- **Protocol basis:** The protocol requires corruption-instance detection and localization evaluation. The exact evaluator matching rule for C3 duplicate-propagation findings is not fully specified in the available protocol text.
+- **Convention implemented:** For `C3_duplicate_propagation`, localization accepts findings with `rule_id` equal to `I4.repeated_row` or `I4.repeated_source_path` only when `key_type="acquisition_key"`. Operation-row matching applies the same rule and key-type restriction.
+- **Rationale:** Prevent a finding with an unexpected key type from receiving C3 localization credit merely because its affected key or evidence-row index overlaps the corruption truth.
+- **Alternatives considered:** Retain unrestricted I4 key matching; restrict only direct localization; restrict both direct localization and operation-row matching.
+- **Evidence available at decision time:** A regression test reproduced the issue: an `I4.repeated_row` finding with `key_type="person_key"` received one localization true positive under the previous evaluator. After the correction, the finding received zero localization true positives and zero localization false positives.
+- **Made before or after seeing affected results:** The correction was made after observing the failing regression test and before any full-grid evaluation.
+- **Effect on protocol/interpretation:** This is an evaluator implementation convention, not a change to the corruption definitions or benchmark grid. Findings excluded by the key-type filter do not contribute to C3 localization false-positive counts; these counts must not be interpreted as the total number of unrelated detector findings. Regression tests now cover both rejection of a wrong-key-type finding and localization credit for a valid acquisition-level finding. This does not establish that localization scoring is fully validated for C1–C6.
+- **Validation evidence:** `python -m py_compile .\src\neurofusion_qa\benchmark.py .\tests\test_benchmark.py` completed successfully. `python -m pytest .\tests\test_benchmark.py -k "c3" -q`: 3 passed. `python -m pytest .\tests\test_benchmark.py -k "c3 or c4 or c6" -q`: 8 passed in the earlier targeted run. `python -m pytest .\tests\test_benchmark.py -q`: 44 passed. `git diff --check` reported no whitespace errors.
+- **Files changed:** `src/neurofusion_qa/benchmark.py`, `tests/test_benchmark.py`, `templates/DECISION_LOG.md`.
+- **Owner and due date:** Student maintainer; before the full benchmark grid.
+- **PI approval:** Pending.
