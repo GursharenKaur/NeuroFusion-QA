@@ -504,6 +504,54 @@ def test_c2_benchmark_localization_uses_target_row():
 
     assert evaluation.localization_true_positives >= 1
 
+def test_c2_operation_matching_does_not_credit_unrelated_rule():
+    affected_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00013",
+    )
+
+    unrelated_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00099",
+    )
+
+    unrelated_finding = Finding(
+        rule_id="I4.missing_parent_acquisition",
+        severity="ERROR",
+        message="Unrelated lineage finding.",
+        key_type="person_key",
+        affected_keys=(unrelated_key,),
+        expected="parent acquisition present",
+        observed=None,
+        evidence_rows=({"row_index": 25},),
+        remediation="Inspect the acquisition lineage.",
+    )
+
+    truth = {
+        "corruption": "C2_canonicalization_collision",
+        "operations": [
+            {
+                "operation": "canonicalization_collision",
+                "row_index": 25,
+            }
+        ],
+        "expected_violations": [
+            "I1.canonicalization_collision",
+            "I2.cardinality_mismatch",
+        ],
+        "affected_keys": [affected_key],
+    }
+
+    evaluation = evaluate_benchmark_findings(
+        [unrelated_finding],
+        truth,
+    )
+
+    assert evaluation.expected_violation_detected is False
+    assert evaluation.localization_true_positives == 0
+
 def test_c3_produces_i2_i4_and_i6_benchmark_findings():
     clean_records = build_synthetic_manifest(
         people=16,
@@ -661,6 +709,59 @@ def test_c3_credits_valid_acquisition_key_for_i4_finding():
     assert evaluation.localization_true_positives == 1
     assert evaluation.localization_false_positives == 0
 
+def test_c4_operation_matching_does_not_credit_unrelated_rule():
+    affected_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00010",
+    )
+
+    unrelated_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00099",
+    )
+
+    unrelated_finding = Finding(
+        rule_id="I4.missing_parent_acquisition",
+        severity="ERROR",
+        message="Unrelated lineage finding.",
+        key_type="person_key",
+        affected_keys=(unrelated_key,),
+        expected="parent acquisition present",
+        observed=None,
+        evidence_rows=({"row_index": 31},),
+        remediation="Inspect the acquisition lineage.",
+    )
+
+    truth = {
+        "corruption": "C4_cross_modal_permutation",
+        "operations": [
+            {
+                "operation": "reassign_modality_record_to_other_participant",
+                "source_row_index": 18,
+                "target_row_index": 31,
+                "original_person_key": affected_key,
+                "new_person_key": (
+                    "synthetic:identityguard",
+                    "1.0",
+                    "sub-00016",
+                ),
+                "modality": "mod-01",
+            }
+        ],
+        "expected_violations": ["I3.person_pairing"],
+        "affected_keys": [affected_key],
+    }
+
+    evaluation = evaluate_benchmark_findings(
+        [unrelated_finding],
+        truth,
+    )
+
+    assert evaluation.expected_violation_detected is False
+    assert evaluation.localization_true_positives == 0
+
 def test_c4_produces_i3_person_pairing_finding():
     clean_records = build_synthetic_manifest(
         people=16,
@@ -701,7 +802,7 @@ def test_c4_produces_i3_person_pairing_finding():
     assert evaluation.detected is True
     assert evaluation.expected_violation_detected is True
     assert evaluation.failure_type_correct is True
-
+    assert evaluation.localization_true_positives >= 1
 
 def test_c4_empty_findings_do_not_receive_localization_credit():
     affected_key = (
@@ -734,6 +835,98 @@ def test_c4_empty_findings_do_not_receive_localization_credit():
     assert evaluation.localization_false_positives == 0
     assert evaluation.localized_key_count == 0
 
+def test_c5_credits_valid_person_split_leakage_finding():
+    affected_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00010",
+    )
+
+    valid_finding = Finding(
+        rule_id="I5.person_split_leakage",
+        severity="ERROR",
+        message="Person appears across multiple splits.",
+        key_type="person",
+        affected_keys=[affected_key],
+        expected="person belongs to one split",
+        observed="train and validation",
+        evidence_rows=[18, 19],
+        remediation="Keep all records for this person in one split.",
+    )
+
+    truth = {
+        "corruption": "C5_subject_split_leakage",
+        "operations": [
+            {
+                "operation": "move_record_to_different_split",
+                "source_row_index": 18,
+                "affected_person_key": affected_key,
+                "original_split": "train",
+                "new_split": "validation",
+            }
+        ],
+        "expected_violations": ["I5.person_split_leakage"],
+        "affected_keys": [affected_key],
+    }
+
+    evaluation = evaluate_benchmark_findings(
+        [valid_finding],
+        truth,
+    )
+
+    assert evaluation.expected_violation_detected is True
+    assert evaluation.localization_true_positives == 1
+    assert evaluation.localization_false_positives == 0
+
+def test_c5_operation_matching_does_not_credit_unrelated_rule():
+    affected_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00010",
+    )
+
+    unrelated_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00099",
+    )
+
+    unrelated_finding = Finding(
+        rule_id="I4.missing_parent_acquisition",
+        severity="ERROR",
+        message="Unrelated lineage finding.",
+        key_type="person",
+        affected_keys=[unrelated_key],
+        expected="parent acquisition present",
+        observed=None,
+        evidence_rows=[18, 19],
+        remediation="Inspect the acquisition lineage.",
+    )
+
+    truth = {
+        "corruption": "C5_subject_split_leakage",
+        "operations": [
+            {
+                "operation": "move_record_to_different_split",
+                "source_row_index": 18,
+                "affected_person_key": affected_key,
+                "original_split": "train",
+                "new_split": "validation",
+            }
+        ],
+        "expected_violations": ["I5.person_split_leakage"],
+        "affected_keys": [affected_key],
+    }
+
+    evaluation = evaluate_benchmark_findings(
+        [unrelated_finding],
+        truth,
+    )
+
+    assert evaluation.expected_violation_detected is False
+    assert evaluation.localization_true_positives == 0
+    assert evaluation.localization_false_positives == 0
+    assert evaluation.localized_key_count == 0
 
 def test_c5_produces_i5_person_split_leakage_finding():
     clean_records = build_synthetic_manifest(
@@ -1060,6 +1253,52 @@ def test_c1_localization_does_not_count_mixed_key_types_as_people():
     assert evaluation.localization_true_positives == 1
     assert evaluation.localization_false_positives == 0
 
+def test_c1_operation_matching_does_not_credit_unrelated_rule():
+    affected_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00013",
+    )
+
+    unrelated_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00099",
+    )
+
+    unrelated_finding = Finding(
+        rule_id="I4.missing_parent_acquisition",
+        severity="ERROR",
+        message="Unrelated lineage finding.",
+        key_type="person_key",
+        affected_keys=(unrelated_key,),
+        expected="parent acquisition present",
+        observed=None,
+        evidence_rows=({"row_index": 25},),
+        remediation="Inspect the acquisition lineage.",
+    )
+
+    truth = {
+        "corruption": "C1_namespace_stripping",
+        "operations": [
+            {
+                "operation": "remove_dataset_namespace",
+                "row_index": 25,
+            }
+        ],
+        "expected_violations": [
+            "I1.namespace_completeness",
+        ],
+        "affected_keys": [affected_key],
+    }
+
+    evaluation = evaluate_benchmark_findings(
+        [unrelated_finding],
+        truth,
+    )
+
+    assert evaluation.expected_violation_detected is False
+    assert evaluation.localization_true_positives == 0
 
 def test_resume_rejects_existing_job_with_tampered_artifact(tmp_path):
     from pathlib import Path
@@ -1580,3 +1819,47 @@ def test_baseline_evaluation_keeps_unavailable_baselines_unscored():
     assert result["results"]["naive_join"]["status"] == "not_scored"
     assert result["results"]["bids_validation"]["status"] == "not_scored"
     assert "C0_clean only" in result["clean_false_alarm_scope"]
+
+def test_c5_operation_matching_uses_source_row_index():
+    affected_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00010",
+    )
+    unrelated_key = (
+        "synthetic:identityguard",
+        "1.0",
+        "sub-00099",
+    )
+
+    finding = Finding(
+        rule_id="I5.person_split_leakage",
+        severity="ERROR",
+        message="Person appears across multiple splits.",
+        key_type="person",
+        affected_keys=[unrelated_key],
+        expected="person belongs to one split",
+        observed="train and validation",
+        evidence_rows=({"row_index": 18},),
+        remediation="Keep all records for this person in one split.",
+    )
+
+    truth = {
+        "corruption": "C5_subject_split_leakage",
+        "operations": [
+            {
+                "operation": "move_record_to_different_split",
+                "source_row_index": 18,
+                "affected_person_key": affected_key,
+                "original_split": "train",
+                "new_split": "validation",
+            }
+        ],
+        "expected_violations": ["I5.person_split_leakage"],
+        "affected_keys": [affected_key],
+    }
+
+    evaluation = evaluate_benchmark_findings([finding], truth)
+
+    assert evaluation.expected_violation_detected is True
+    assert evaluation.localization_true_positives == 1

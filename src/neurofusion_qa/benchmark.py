@@ -261,7 +261,14 @@ def evaluate_benchmark_findings(
             )
             for key in finding.affected_keys
         }
-
+    elif corruption == "C5_subject_split_leakage":
+        localized_keys = {
+            _freeze_key(key)
+            for finding in findings
+            if finding.rule_id == "I5.person_split_leakage"
+            and finding.key_type == "person"
+            for key in finding.affected_keys
+        }
     else:
         localized_keys = {
             _freeze_key(key)
@@ -280,9 +287,14 @@ def evaluate_benchmark_findings(
     operations = truth.get("operations", [])
 
     for operation_index, operation in enumerate(operations):
+        operation_fields = ["row_index", "target_row_index"]
+
+        if truth.get("corruption") == "C5_subject_split_leakage":
+            operation_fields.append("source_row_index")
+
         operation_rows = {
             operation[field]
-            for field in ("row_index", "target_row_index")
+            for field in operation_fields
             if field in operation
         }
 
@@ -308,6 +320,40 @@ def evaluate_benchmark_findings(
                             "I4.repeated_source_path",
                         }
                         and finding.key_type == "acquisition_key"
+                    )
+                )
+                and (
+                    truth.get("corruption") != "C1_namespace_stripping"
+                    or (
+                        finding.rule_id == "I1.namespace_completeness"
+                        and finding.key_type == "person_key"
+                    )
+                )
+                and (
+                    truth.get("corruption") != "C4_cross_modal_permutation"
+                    or (
+                        finding.rule_id == "I3.person_pairing"
+                        and finding.key_type == "cross_modal_pair"
+                    )
+                )
+                and (
+                    truth.get("corruption") != "C5_subject_split_leakage"
+                    or (
+                        finding.rule_id == "I5.person_split_leakage"
+                        and finding.key_type == "person"
+                    )
+                )
+                and (
+                    truth.get("corruption") != "C2_canonicalization_collision"
+                    or (
+                        (
+                            finding.rule_id == "I1.canonicalization_collision"
+                            and finding.key_type == "person_key"
+                        )
+                        or (
+                            finding.rule_id == "I2.cardinality_mismatch"
+                            and finding.key_type == "join_key"
+                        )
                     )
                 )
             )

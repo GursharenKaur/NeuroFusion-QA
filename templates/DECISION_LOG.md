@@ -152,3 +152,67 @@ Copy this block for every scientific, data, model, authorship, or submission dec
 - **Files changed:** `src/neurofusion_qa/benchmark.py`, `tests/test_benchmark.py`, `templates/DECISION_LOG.md`.
 - **Owner and due date:** Student maintainer; before the full benchmark grid.
 - **PI approval:** Pending.
+
+### D-012 - C1 evaluator localization convention
+
+- **Decision date:** 2026-10-14.
+- **Decision status:** Student implementation convention; PI approval pending.
+- **Protocol basis:** The protocol requires corruption-instance detection and localization evaluation. The exact matching rule for C1 localization is not fully specified in the available protocol text.
+- **Convention implemented:** For `C1_namespace_stripping`, operation-row localization credit is restricted to findings with `rule_id="I1.namespace_completeness"` and `key_type="person_key"`. Direct localization continues to count person-key findings rather than cross-modal pairs or acquisition keys as separate people.
+- **Rationale:** Prevent unrelated findings from receiving C1 localization credit merely because their evidence refers to a row affected by namespace stripping.
+- **Alternatives considered:** Retain unrestricted operation-row matching; restrict direct localization only; restrict both direct localization and operation-row matching.
+- **Evidence available at decision time:** A regression test reproduced the issue: an `I4.missing_parent_acquisition` finding with `key_type="person_key"` and evidence on the affected row received one localization true positive despite the absence of the expected C1 violation. After the correction, the regression test passed.
+- **Made before or after seeing affected results:** After observing the failing regression test and before full-grid evaluation.
+- **Effect on protocol/interpretation:** This is an evaluator convention, not a change to corruption definitions or the benchmark grid. Findings excluded by this operation-matching filter do not contribute to C1 localization false-positive counts; those counts must not be interpreted as the total number of unrelated detector findings.
+- **Validation evidence:** The focused C1 regression test passed; `python -m pytest .\tests\test_benchmark.py -q`: 45 passed at the C1 checkpoint.
+- **Files changed:** `src/neurofusion_qa/benchmark.py`, `tests/test_benchmark.py`, `templates/DECISION_LOG.md`.
+- **Owner and due date:** Student maintainer; before the full benchmark grid.
+- **PI approval:** Pending.
+
+### D-013 - C2 evaluator localization convention
+
+- **Decision date:** 2026-10-14.
+- **Decision status:** Student implementation convention; PI approval pending.
+- **Protocol basis:** The protocol requires corruption-instance detection and localization evaluation. The exact matching rule for C2 localization is not fully specified in the available protocol text.
+- **Convention implemented:** For `C2_canonicalization_collision`, operation-row localization credit is restricted to either `I1.canonicalization_collision` with `key_type="person_key"` or `I2.cardinality_mismatch` with `key_type="join_key"`.
+- **Rationale:** Preserve localization credit for the declared identity-collision finding and its join-cardinality consequence while preventing unrelated findings from receiving credit through row overlap.
+- **Alternatives considered:** Retain unrestricted operation-row matching; accept any person-key finding; accept only the canonicalization-collision rule; accept the two declared rule/key-type combinations.
+- **Evidence available at decision time:** The synthetic C2 integration output showed `I1.canonicalization_collision` using `person_key` and `I2.cardinality_mismatch` using `join_key`. A regression test reproduced false credit for an unrelated `I4.missing_parent_acquisition` finding sharing the operation row.
+- **Made before or after seeing affected results:** After observing the failing regression test and inspecting actual C2 finding key types; before full-grid evaluation.
+- **Effect on protocol/interpretation:** This is an evaluator convention, not a change to the corruption definitions or benchmark grid. Findings excluded by this filter do not contribute to C2 localization false-positive counts.
+- **Validation evidence:** C2 tests: 3 passed. Combined C1/C2 regression and localization checks: 3 passed at the targeted checkpoint.
+- **Files changed:** `src/neurofusion_qa/benchmark.py`, `tests/test_benchmark.py`, `templates/DECISION_LOG.md`.
+- **Owner and due date:** Student maintainer; before the full benchmark grid.
+- **PI approval:** Pending.
+
+### D-014 - C4 evaluator localization convention
+
+- **Decision date:** 2026-10-14.
+- **Decision status:** Student implementation convention; PI approval pending.
+- **Protocol basis:** The protocol requires corruption-instance detection and localization evaluation. The exact matching rule for C4 localization is not fully specified in the available protocol text.
+- **Convention implemented:** For `C4_cross_modal_permutation`, operation-row localization credit is restricted to findings with `rule_id="I3.person_pairing"` and `key_type="cross_modal_pair"`.
+- **Rationale:** Prevent unrelated findings from receiving C4 localization credit through evidence-row overlap while preserving the declared cross-modal pairing finding as the localization target.
+- **Alternatives considered:** Retain unrestricted operation-row matching; restrict direct localization only; restrict operation-row matching to the declared pairing rule and key type.
+- **Evidence available at decision time:** A regression test reproduced false credit for an unrelated `I4.missing_parent_acquisition` finding sharing the C4 operation's target row.
+- **Made before or after seeing affected results:** After observing the failing regression test and before full-grid evaluation.
+- **Effect on protocol/interpretation:** This is an evaluator convention, not a change to the corruption definitions or benchmark grid. Findings excluded by this filter do not contribute to C4 localization false-positive counts.
+- **Validation evidence:** C4 regression test: 1 passed; all C4 tests: 3 passed at the targeted checkpoint. The C4 integration test also asserts at least one localization true positive for the valid synthetic corruption.
+- **Files changed:** `src/neurofusion_qa/benchmark.py`, `tests/test_benchmark.py`, `templates/DECISION_LOG.md`.
+- **Owner and due date:** Student maintainer; before the full benchmark grid.
+- **PI approval:** Pending.
+
+### D-015 - C5 evaluator localization convention
+
+- **Decision date:** 2026-10-14.
+- **Decision status:** Student implementation convention; PI approval pending.
+- **Protocol basis:** The protocol requires split-independence detection and localization evaluation. The exact matching rule for C5 localization is not fully specified in the available protocol text.
+- **Convention implemented:** For C5_subject_split_leakage, direct localization is restricted to findings with rule_id="I5.person_split_leakage" and key_type="person". The same rule/key-type restriction is applied to operation-row matching. C5 operation matching includes source_row_index in addition to the existing row_index and target_row_index fields.
+- **Rationale:** Prevent unrelated findings from contributing to C5 localization false positives or localized-key counts, while preserving credit for the declared split-leakage finding.
+- **Alternatives considered:** Retain unrestricted fallback localization; restrict direct localization only; restrict both direct localization and operation-row matching.
+- **Evidence available at decision time:** A regression test reproduced a localization false positive from an unrelated `I4.missing_parent_acquisition` finding with `key_type="person"`. A positive-control test confirms that a valid `I5.person_split_leakage` finding receives localization credit.
+- **Made before or after seeing affected results:** After observing the failing regression test and before full-grid evaluation.
+- **Effect on protocol/interpretation:** This is an evaluator convention, not a change to corruption definitions or the benchmark grid. Findings excluded by the key-type filter do not contribute to C5 localization false-positive counts. C5 operation matching includes `source_row_index` and is tested independently of direct key overlap.
+- **Validation evidence:** C5 regression and positive-control tests: 3 passed; C4/C5 tests: 6 passed at the earlier checkpoint; full tests/test_benchmark.py: 50 passed at the current checkpoint.
+- **Files changed:** `src/neurofusion_qa/benchmark.py`, `tests/test_benchmark.py`, `templates/DECISION_LOG.md`.
+- **Owner and due date:** Student maintainer; before the full benchmark grid.
+- **PI approval:** Pending.
