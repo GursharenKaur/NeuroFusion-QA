@@ -189,6 +189,33 @@ The implementation requires the crosswalk to contain:
 The mapping is treated as authoritative input. IdentityGuard-BIDS never
 constructs it using participant-string similarity.
 
+
+### Crosswalk metadata validation
+
+As an implementation convention, IdentityGuard-BIDS validates crosswalk
+metadata before allowing a crosswalk to authorize cross-dataset identity.
+The checks require:
+
+- non-empty `source`, `version`, and `approved_by` strings
+- a `sha256` value containing exactly 64 hexadecimal characters
+- an `approved_date` that is a valid calendar date in `YYYY-MM-DD` format
+- a non-empty mapping dictionary whose source and target person keys are
+  tuples of three non-empty strings representing namespace, version, and
+  participant ID
+
+Invalid metadata produces an `I3.crosswalk_provenance` finding with severity
+`ERROR`. The invalid crosswalk cannot authorize a cross-dataset pairing, so
+an incompatible identity also produces an `I3.person_pairing` finding.
+
+These checks validate metadata structure and formatting only. They do not
+verify the digest against the actual crosswalk artifact or independently
+authenticate the approval record. Those checks require verification against
+the authoritative artifact and approval evidence.
+
+These validation rules are implementation conventions chosen to operationalize
+the protocol. They are not claimed to be literal requirements from the
+original research handoff.
+
 ### Session compatibility
 
 The implementation uses the following deterministic rule:

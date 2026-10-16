@@ -1,10 +1,8 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import Any
+from datetime import date
 import re
 import unicodedata
-
+from typing import Any
 
 @dataclass(frozen=True)
 class Finding:
@@ -348,20 +346,78 @@ def _session_task_compatible(
 
     return left_value == right_value
 
+def _crosswalk_metadata_errors(
+    crosswalk: AuthoritativeCrosswalk,
+) -> list[str]:
+    """Validate crosswalk provenance metadata and mapping structure."""
+    errors: list[str] = []
+
+    for field_name in (
+        "source",
+        "version",
+        "approved_by",
+    ):
+        value = getattr(crosswalk, field_name, None)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(f"{field_name} must be a non-empty string")
+
+    digest = getattr(crosswalk, "sha256", None)
+    if (
+        not isinstance(digest, str)
+        or re.fullmatch(r"[0-9a-fA-F]{64}", digest) is None
+    ):
+        errors.append(
+            "sha256 must contain exactly 64 hexadecimal characters"
+        )
+
+    approved_date = getattr(crosswalk, "approved_date", None)
+    if (
+        not isinstance(approved_date, str)
+        or re.fullmatch(r"\d{4}-\d{2}-\d{2}", approved_date) is None
+    ):
+        errors.append("approved_date must use YYYY-MM-DD format")
+    else:
+        try:
+            date.fromisoformat(approved_date)
+        except ValueError:
+            errors.append("approved_date must be a valid calendar date")
+
+    mapping = getattr(crosswalk, "mapping", None)
+    if not isinstance(mapping, dict) or not mapping:
+        errors.append("mapping must be a non-empty dictionary")
+    else:
+        for source_key, target_key in mapping.items():
+            for label, person_key in (
+                ("source", source_key),
+                ("target", target_key),
+            ):
+                if (
+                    not isinstance(person_key, tuple)
+                    or len(person_key) != 3
+                    or any(
+                        not isinstance(part, str) or not part.strip()
+                        for part in person_key
+                    )
+                ):
+                    errors.append(
+                        f"mapping {label} keys must be tuples of three "
+                        "non-empty strings"
+                    )
+                    break
+
+    return errors
 
 def _crosswalk_maps_persons(
     left_key: tuple[str, str, str],
     right_key: tuple[str, str, str],
     crosswalk: AuthoritativeCrosswalk,
 ) -> bool:
-    """
-    Check whether an authoritative crosswalk explicitly establishes
-    the supplied left/right person relationship.
-    """
+    """Check a mapping only when crosswalk metadata is valid."""
+    if _crosswalk_metadata_errors(crosswalk):
+        return False
+
     mapped_right = crosswalk.mapping.get(left_key)
-
     return mapped_right == right_key
-
 
 def check_i3_cross_modal_pairing(
     pairs: list[tuple[Any, Any]],
@@ -382,6 +438,40 @@ def check_i3_cross_modal_pairing(
     similarity to establish identity.
     """
     findings: list[Finding] = []
+    crosswalk_errors = (
+        _crosswalk_metadata_errors(crosswalk)
+        if crosswalk is not None
+        else []
+    )
+
+    if crosswalk_errors:
+        findings.append(
+            Finding(
+                rule_id="I3.crosswalk_provenance",
+                severity="ERROR",
+                message="Authoritative crosswalk metadata is invalid.",
+                key_type="crosswalk",
+                affected_keys=(),
+                expected=(
+                    "non-empty provenance fields, a valid SHA-256 "
+                    "digest format, an ISO approval date, and a valid mapping"
+                ),
+                observed={
+                    "errors": crosswalk_errors,
+                    "source": crosswalk.source,
+                    "version": crosswalk.version,
+                    "sha256": crosswalk.sha256,
+                    "approved_by": crosswalk.approved_by,
+                    "approved_date": crosswalk.approved_date,
+                },
+                evidence_rows=(),
+                remediation=(
+                    "Correct the crosswalk metadata and verify its digest "
+                    "against the authoritative crosswalk artifact before "
+                    "using it to establish cross-dataset identity."
+                ),
+            )
+        )
 
     for pair_index, (left, right) in enumerate(pairs):
         left_key = left.person_key

@@ -655,7 +655,7 @@ def test_i3_authoritative_crosswalk_allows_valid_cross_dataset_pair():
     crosswalk = AuthoritativeCrosswalk(
         source="approved_crosswalk.csv",
         version="1.0",
-        sha256="abc123",
+        sha256="a" * 64,
         approved_by="PI",
         approved_date="2026-09-22",
         mapping={
@@ -669,6 +669,48 @@ def test_i3_authoritative_crosswalk_allows_valid_cross_dataset_pair():
     )
 
     assert findings == []
+
+
+def test_i3_invalid_crosswalk_metadata_cannot_authorize_pairing():
+    left = ManifestRecord(
+        dataset_namespace="dataset-A",
+        dataset_version="1.0",
+        participant_id="sub-01",
+        session_id="ses-01",
+        modality="bold",
+        task="task-rest",
+    )
+
+    right = ManifestRecord(
+        dataset_namespace="dataset-B",
+        dataset_version="1.0",
+        participant_id="sub-42",
+        session_id="ses-01",
+        modality="eeg",
+        task="task-rest",
+    )
+
+    crosswalk = AuthoritativeCrosswalk(
+        source="approved_crosswalk.csv",
+        version="1.0",
+        sha256="abc123",
+        approved_by="PI",
+        approved_date="2026-09-22",
+        mapping={
+            left.person_key: right.person_key,
+        },
+    )
+
+    findings = check_i3_cross_modal_pairing(
+        [(left, right)],
+        crosswalk=crosswalk,
+    )
+
+    rule_ids = {finding.rule_id for finding in findings}
+
+    assert "I3.crosswalk_provenance" in rule_ids
+    assert "I3.person_pairing" in rule_ids
+    assert all(finding.severity == "ERROR" for finding in findings)
 
 def test_i5_person_split_is_clean():
     records = [
