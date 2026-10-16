@@ -89,6 +89,12 @@ The canonicalization procedure is:
    numeric label to its canonical integer representation.
 6. Reconstruct the canonical participant representation as `sub-<label>`.
 
+**Invalid canonical labels - implementation convention**
+
+After Unicode normalization, case folding, removal of the optional leading `sub` prefix, and separator removal, the canonicalization function raises `ValueError` if the resulting label is empty. This covers empty or whitespace-only inputs and prefix-only labels such as `sub`, `sub-`, and `sub_`. The namespace-completeness checker remains responsible for reporting missing participant IDs in manifest records; the standalone canonicalization function rejects invalid inputs rather than returning the ambiguous canonical value `sub-`.
+
+Repeated separators in otherwise nonempty labels continue to follow the existing separator-equivalence convention. Canonicalization remains an audit representation only and does not establish that distinct raw labels identify the same real person.
+
 Examples:
 
 | Raw participant ID | Canonical representation |
@@ -116,6 +122,25 @@ This canonicalization procedure is an implementation convention rather than
 a requirement explicitly prescribed by the research handoff. It is fixed for
 the experiments using this implementation so that the corruption and audit
 behavior remain reproducible.
+
+## I1 Acquisition-Key Injectivity Evidence Convention
+
+The acquisition key includes dataset namespace, dataset version, participant,
+session, modality, task, acquisition, and run. Optional acquisition entities
+remain optional as defined by the manifest schema.
+
+The checker excludes records without a usable source path from source-identity
+comparison. For records with a source path, distinct paths under the same
+acquisition key are reported as an injectivity violation.
+
+For a single path, the checker reports a violation when multiple distinct
+retrieved SHA-256 hashes are associated with it. Missing hashes and the
+`not_retrieved` marker are not treated as content identities and do not
+establish content equality or inequality.
+
+This is an implementation convention for incomplete source evidence. It does
+not replace namespace completeness checks or imply that an unverified source
+file has been content-validated.
 
 ## I3 Cross-Modal Pairing Conventions
 

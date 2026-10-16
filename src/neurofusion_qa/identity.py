@@ -69,44 +69,74 @@ def check_i1_namespace_completeness(
 
     return findings
 
+
 def check_i1_acquisition_key_injectivity(
     records: list[Any],
 ) -> list[Finding]:
     """
     Check I1 acquisition-key injectivity.
 
-    One canonical acquisition key must not map to multiple distinct
-    source file/hash identities.
+    Implementation convention:
+    - Records without a usable source path are excluded.
+    - Distinct paths under one acquisition key are a conflict.
+    - Distinct retrieved hashes for the same path are a conflict.
+    - Missing hashes and "not_retrieved" are not content identities.
+    - Evidence retains observed paths even when hashes are unavailable.
     """
-    grouped: dict[Any, set[tuple[Any, Any]]] = {}
+    grouped: dict[
+        Any, dict[str, dict[str, set[str]]]
+    ] = {}
+    observed_hashes: dict[Any, dict[str, set[str | None]]] = {}
 
     for record in records:
-        acquisition_key = record.acquisition_key
-        source_identity = (
-            record.source_path,
-            record.source_sha256,
-        )
+        source_path = record.source_path
 
-        grouped.setdefault(acquisition_key, set()).add(source_identity)
+        if (
+            not isinstance(source_path, str)
+            or not source_path.strip()
+        ):
+            continue
+
+        acquisition_key = record.acquisition_key
+        source_hash = record.source_sha256
+
+        path_hashes = grouped.setdefault(
+            acquisition_key, {}
+        ).setdefault(source_path, set())
+
+        observed_hashes.setdefault(
+            acquisition_key, {}
+        ).setdefault(source_path, set()).add(source_hash)
+
+        if (
+            isinstance(source_hash, str)
+            and source_hash.strip()
+            and source_hash != "not_retrieved"
+        ):
+            path_hashes.add(source_hash)
 
     findings: list[Finding] = []
 
-    for acquisition_key, source_identities in grouped.items():
-        if len(source_identities) <= 1:
+    for acquisition_key, paths in grouped.items():
+        conflicting_hash_paths = {
+            source_path
+            for source_path, hashes in paths.items()
+            if len(hashes) > 1
+        }
+
+        if len(paths) <= 1 and not conflicting_hash_paths:
             continue
 
         evidence_rows = tuple(
             {
                 "acquisition_key": acquisition_key,
                 "source_path": source_path,
-                "source_sha256": source_sha256,
+                "source_sha256": source_hash,
             }
-            for source_path, source_sha256 in sorted(
-                source_identities,
-                key=lambda identity: (
-                    identity[0] or "",
-                    identity[1] or "",
-                ),
+            for source_path in sorted(paths)
+            for source_hash in sorted(
+                observed_hashes[acquisition_key][source_path],
+                key=lambda value: (value is not None, value or ""),
             )
         )
 
@@ -115,18 +145,19 @@ def check_i1_acquisition_key_injectivity(
                 rule_id="I1.acquisition_key_injectivity",
                 severity="ERROR",
                 message=(
-                    "One acquisition key maps to multiple distinct "
-                    "source file/hash identities."
+                    "One acquisition key maps to multiple source paths "
+                    "or conflicting retrieved hashes."
                 ),
                 key_type="acquisition_key",
                 affected_keys=(acquisition_key,),
                 expected=(
-                    "each acquisition_key maps to at most one "
-                    "distinct source file/hash identity"
+                    "each acquisition key maps to one source path "
+                    "and at most one retrieved source hash"
                 ),
                 observed=(
-                    f"{len(source_identities)} distinct "
-                    "source file/hash identities"
+                    f"{len(paths)} distinct source paths; "
+                    f"{len(conflicting_hash_paths)} paths with "
+                    "conflicting retrieved hashes"
                 ),
                 evidence_rows=evidence_rows,
                 remediation=(
@@ -151,6 +182,10 @@ def canonicalize_participant_id(participant_id: str) -> str:
     - numeric labels have leading zeroes removed
     - canonical form is reconstructed as 'sub-<label>'
 
+    Raises:
+        ValueError: If the participant ID is empty or contains only
+            the BIDS subject prefix and separators.
+
     The original participant_id is never modified.
     """
     normalized = unicodedata.normalize("NFKC", participant_id)
@@ -161,6 +196,11 @@ def canonicalize_participant_id(participant_id: str) -> str:
 
     # Treat punctuation/separators as equivalent.
     label = re.sub(r"[-_.\s]+", "", label)
+
+    if not label:
+        raise ValueError(
+            "Participant ID must contain a nonempty label after normalization."
+        )
 
     # Numeric participant labels are canonicalized by numeric value.
     if label.isdigit():

@@ -10,6 +10,7 @@ from neurofusion_qa.identity import (
     check_i5_split_independence,
     check_i6_metric_denominator_traceability,
 )
+import pytest
 
 from neurofusion_qa.manifest import ManifestRecord
 
@@ -141,7 +142,10 @@ def test_i1_acquisition_key_injectivity_detects_different_source_paths():
     assert finding.severity == "ERROR"
     assert finding.key_type == "acquisition_key"
     assert finding.affected_keys == (record_1.acquisition_key,)
-    assert finding.observed == "2 distinct source file/hash identities"
+    assert finding.observed == (
+        "2 distinct source paths; "
+        "0 paths with conflicting retrieved hashes"
+    )
     assert len(finding.evidence_rows) == 2
 
 
@@ -272,6 +276,44 @@ def test_i1_canonicalization_collision_is_namespace_qualified():
 
     assert findings == []
 
+
+def test_i1_acquisition_key_injectivity_retains_paths_without_retrieved_hashes():
+    record_1 = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        modality="bold",
+        source_path="sub-01/func/source_a.nii.gz",
+        source_sha256="not_retrieved",
+    )
+    record_2 = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        modality="bold",
+        source_path="sub-01/func/source_b.nii.gz",
+        source_sha256="not_retrieved",
+    )
+
+    findings = check_i1_acquisition_key_injectivity(
+        [record_1, record_2]
+    )
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "I1.acquisition_key_injectivity"
+
+    evidence_paths = {
+        row["source_path"] for row in findings[0].evidence_rows
+    }
+    assert evidence_paths == {
+        "sub-01/func/source_a.nii.gz",
+        "sub-01/func/source_b.nii.gz",
+    }
+    assert all(
+        row["source_sha256"] == "not_retrieved"
+        for row in findings[0].evidence_rows
+    )
+
 def test_i2_one_to_one_clean():
     findings = check_i2_join_cardinality(
         {"sub-01": 1, "sub-02": 1},
@@ -280,7 +322,6 @@ def test_i2_one_to_one_clean():
     )
 
     assert findings == []
-
 
 def test_i2_one_to_one_detects_multiple_matches():
     findings = check_i2_join_cardinality(
@@ -1052,3 +1093,89 @@ def test_i6_detects_nonpositive_denominator():
         finding.rule_id == "I6.invalid_denominator"
         for finding in findings
     )
+
+
+import pytest
+
+
+@pytest.mark.parametrize(
+    "participant_id",
+    ["", "  ", "sub", "sub-", "sub_"],
+)
+def test_canonicalize_participant_id_rejects_empty_canonical_labels(
+    participant_id,
+):
+    with pytest.raises(ValueError, match="nonempty label"):
+        canonicalize_participant_id(participant_id)
+
+
+def test_canonicalize_participant_id_preserves_existing_separator_convention():
+    assert canonicalize_participant_id("sub--01") == "sub-1"
+    assert canonicalize_participant_id("sub 01") == "sub-1"
+    assert canonicalize_participant_id("sub-A01") == "sub-a01"
+
+
+def test_i1_acquisition_key_injectivity_ignores_missing_source_paths():
+    record_1 = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        modality="bold",
+        source_path=None,
+        source_sha256=None,
+    )
+    record_2 = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        modality="bold",
+        source_path=None,
+        source_sha256=None,
+    )
+
+    assert check_i1_acquisition_key_injectivity([record_1, record_2]) == []
+
+
+def test_i1_acquisition_key_injectivity_accepts_missing_hash_for_same_path():
+    record_1 = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        modality="bold",
+        source_path="sub-01/func/sub-01_bold.nii.gz",
+        source_sha256="not_retrieved",
+    )
+    record_2 = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        modality="bold",
+        source_path="sub-01/func/sub-01_bold.nii.gz",
+        source_sha256="abc123",
+    )
+
+    assert check_i1_acquisition_key_injectivity([record_1, record_2]) == []
+
+def test_i1_acquisition_key_injectivity_detects_conflicting_retrieved_hashes():
+    record_1 = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        modality="bold",
+        source_path="sub-01/func/sub-01_bold.nii.gz",
+        source_sha256="abc123",
+    )
+    record_2 = ManifestRecord(
+        dataset_namespace="ds000117",
+        dataset_version="1.1.0",
+        participant_id="sub-01",
+        modality="bold",
+        source_path="sub-01/func/sub-01_bold.nii.gz",
+        source_sha256="def456",
+    )
+
+    findings = check_i1_acquisition_key_injectivity([record_1, record_2])
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "I1.acquisition_key_injectivity"
+    assert "conflicting retrieved hashes" in findings[0].message
