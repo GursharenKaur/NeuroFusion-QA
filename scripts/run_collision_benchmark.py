@@ -1,7 +1,9 @@
 ﻿from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -24,6 +26,102 @@ CORRUPTIONS = (
     "C6_denominator_mismatch",
 )
 
+
+def write_checkpoint_atomic(
+    output_root: Path,
+    checkpoint: dict,
+) -> Path:
+    """Atomically persist benchmark progress."""
+    checkpoint_path = output_root / "run_checkpoint.json"
+    temporary_path = output_root / ".run_checkpoint.json.tmp"
+
+    payload = json.dumps(
+        checkpoint,
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+
+    try:
+        with temporary_path.open(
+            "w", encoding="utf-8", newline="\n"
+        ) as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.replace(temporary_path, checkpoint_path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
+
+    return checkpoint_path
+
+
+def validate_checkpoint_identity(
+    checkpoint: dict,
+    config_sha256: str,
+    selected_experiment_ids: list[str],
+) -> None:
+    """Reject checkpoints belonging to another configuration or job selection."""
+    if checkpoint.get("schema_version") != 1:
+        raise RuntimeError("Unsupported benchmark checkpoint schema.")
+
+    if checkpoint.get("config_sha256") != config_sha256:
+        raise RuntimeError(
+            "Checkpoint configuration hash differs from the current config."
+        )
+
+    if checkpoint.get("selected_experiment_ids") != selected_experiment_ids:
+        raise RuntimeError(
+            "Checkpoint job selection differs from the current selection."
+        )
+
+
+def initialize_checkpoint(
+    output_root: Path,
+    config_sha256: str,
+    selected_experiment_ids: list[str],
+    mode: str,
+) -> dict:
+    """Create or validate progress metadata for this exact job selection."""
+    checkpoint_path = output_root / "run_checkpoint.json"
+
+    if checkpoint_path.exists():
+        try:
+            checkpoint = json.loads(
+                checkpoint_path.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                f"Cannot read existing checkpoint {checkpoint_path}: {exc}"
+            ) from exc
+
+        if not isinstance(checkpoint, dict):
+            raise RuntimeError("Existing benchmark checkpoint must be a JSON object.")
+
+        validate_checkpoint_identity(
+            checkpoint,
+            config_sha256,
+            selected_experiment_ids,
+        )
+        raise RuntimeError(
+            "A matching checkpoint already exists. Automatic recovery is not "
+            "implemented yet; preserve it and move it aside before starting "
+            "a fresh run."
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "schema_version": 1,
+        "run_id": now,
+        "run_started_utc": now,
+        "updated_utc": now,
+        "mode": mode,
+        "config_sha256": config_sha256,
+        "selected_experiment_ids": selected_experiment_ids,
+        "completed_results": [],
+        "failures": [],
+    }
 
 def protocol_is_approved(config_path: Path) -> bool:
     text = config_path.read_text(encoding="utf-8")
@@ -163,10 +261,45 @@ def main() -> int:
         return 2
 
     output_root.mkdir(parents=True, exist_ok=True)
-    run_started = datetime.now(timezone.utc).isoformat()
+
+    config_sha256 = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    selected_experiment_ids = [job.experiment_id for job in jobs]
+    mode = "smoke" if args.smoke else "full-grid" if args.full_grid else "subset"
+
+    try:
+        checkpoint = initialize_checkpoint(
+            output_root,
+            config_sha256,
+            selected_experiment_ids,
+            mode,
+        )
+    except RuntimeError as exc:
+        print(f"Checkpoint error: {exc}", file=sys.stderr)
+        return 2
+
+    run_started = checkpoint["run_started_utc"]
     started = time.perf_counter()
-    results = []
-    failures = []
+    results = checkpoint["completed_results"]
+    failures = checkpoint["failures"]
+
+
+    def persist_progress() -> None:
+        checkpoint["updated_utc"] = datetime.now(timezone.utc).isoformat()
+        checkpoint["completed_results"] = results
+        checkpoint["failures"] = failures
+        write_checkpoint_atomic(output_root, checkpoint)
+
+
+    # Persist initial state before starting the first job.
+    try:
+        persist_progress()
+    except OSError as exc:
+        print(
+            f"Checkpoint persistence failed before job execution: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 2
 
     for index, job in enumerate(jobs, start=1):
         print(
@@ -199,6 +332,17 @@ def main() -> int:
                 file=sys.stderr,
                 flush=True,
             )
+        finally:
+            try:
+                persist_progress()
+            except OSError as exc:
+                print(
+                    "Checkpoint persistence failed after processing "
+                    f"{job.experiment_id}: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return 2
 
     summary = {
         "run_started_utc": run_started,
