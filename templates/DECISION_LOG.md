@@ -217,3 +217,17 @@ Copy this block for every scientific, data, model, authorship, or submission dec
 - **Files changed:** `src/neurofusion_qa/benchmark.py`, `tests/test_benchmark.py`, `templates/DECISION_LOG.md`.
 - **Owner and due date:** Student maintainer; before the full benchmark grid.
 - **PI approval:** Pending.
+
+### D-016 - Derivative Sidecar Inventory Convention
+
+**Status:** Implemented; pending review
+
+**Decision:** Keep the primary BIDS source manifest separate from the derivative metadata-sidecar inventory. The source manifest retains its existing participant-associated record semantics. JSON files under `derivatives/meg_derivatives/` are recorded in a separate `derivative_inventory.tsv` artifact.
+
+**Evidence:** For OpenNeuro ds000117 version 1.1.0, 40 JSON sidecars were retrieved and verified against the tagged repository snapshot. The verification report records expected and actual byte counts, Git blob identifiers, Git blob match results, and SHA-256 hashes. The derivative inventory contains 40 records and records the verification-report hash and generated-inventory hash in its metadata.
+
+**Validation:** Nine dedicated derivative-inventory tests pass, and the full test suite passes (241 tests). The original source manifest SHA-256 remains unchanged.
+
+**Limitations:** A verified JSON sidecar establishes the presence and integrity of that metadata file only. It does not establish the presence of corresponding processed MEG data, the processing recipe, or verified parent-acquisition lineage. The inventory therefore records `lineage_status=not_verified` and `processed_data_status=not_assessed`.
+
+**Implementation convention:** The derivative inventory uses normalized dataset-relative POSIX paths, SHA-256 content hashes, and the record type `metadata_sidecar`. It does not treat sidecars as processed derivative outputs or infer lineage solely from participant labels.
