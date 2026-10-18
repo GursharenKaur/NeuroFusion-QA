@@ -8,6 +8,7 @@ from neurofusion_qa.benchmark import (
     affected_count_for_severity,
     generate_benchmark_jobs,
 )
+from pathlib import Path
 import pytest
 import json
 import hashlib
@@ -1392,6 +1393,111 @@ def test_resume_reuses_valid_completed_job(tmp_path):
     assert first.detection == second.detection
     assert second.completed is True
 
+def test_resume_rejects_job_with_different_parameters_and_preserves_artifacts(
+    tmp_path,
+):
+    from dataclasses import replace
+
+    from neurofusion_qa.benchmark import BenchmarkJob, run_benchmark_job
+
+    config_path = Path("config/identityguard_protocol.yaml")
+    output_root = tmp_path / "benchmark"
+
+    job = BenchmarkJob(
+        experiment_id="resume_job_mismatch_C4",
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+        corruption="C4_cross_modal_permutation",
+        severity=0.05,
+        affected_count=1,
+        seed=7,
+    )
+
+    first_result = run_benchmark_job(
+        job,
+        output_root=output_root,
+        config_path=config_path,
+        resume=False,
+    )
+
+    job_dir = Path(first_result.job_directory)
+    marker_path = job_dir / "completed.json"
+    metrics_path = job_dir / "metrics.json"
+
+    # Save existing artifacts so we can verify they remain untouched.
+    marker_before = marker_path.read_bytes()
+    metrics_before = metrics_path.read_bytes()
+
+    # Keep the same experiment ID but change a job parameter.
+    mismatched_job = replace(job, people=64)
+
+    with pytest.raises(RuntimeError, match="not a valid completed job"):
+        run_benchmark_job(
+            mismatched_job,
+            output_root=output_root,
+            config_path=config_path,
+            resume=True,
+        )
+
+    # The original completed job must remain intact.
+    assert marker_path.read_bytes() == marker_before
+    assert metrics_path.read_bytes() == metrics_before
+
+def test_resume_rejects_changed_config_and_preserves_artifacts(tmp_path):
+    import shutil
+
+    from neurofusion_qa.benchmark import BenchmarkJob, run_benchmark_job
+
+    original_config = Path("config/identityguard_protocol.yaml")
+    config_path = tmp_path / "identityguard_protocol.yaml"
+    shutil.copyfile(original_config, config_path)
+
+    output_root = tmp_path / "benchmark"
+
+    job = BenchmarkJob(
+        experiment_id="resume_config_mismatch_C4",
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+        corruption="C4_cross_modal_permutation",
+        severity=0.05,
+        affected_count=1,
+        seed=7,
+    )
+
+    first_result = run_benchmark_job(
+        job,
+        output_root=output_root,
+        config_path=config_path,
+        resume=False,
+    )
+
+    job_dir = Path(first_result.job_directory)
+    marker_path = job_dir / "completed.json"
+    metrics_path = job_dir / "metrics.json"
+
+    # Save existing artifacts before changing the configuration.
+    marker_before = marker_path.read_bytes()
+    metrics_before = metrics_path.read_bytes()
+
+    # Change the configuration after the job has completed.
+    with config_path.open("a", encoding="utf-8") as config_file:
+        config_file.write("\n# Regression test: changed configuration\n")
+
+    with pytest.raises(RuntimeError, match="not a valid completed job"):
+        run_benchmark_job(
+            job,
+            output_root=output_root,
+            config_path=config_path,
+            resume=True,
+        )
+
+    # The old job artifacts must not be overwritten or deleted.
+    assert marker_path.read_bytes() == marker_before
+    assert metrics_path.read_bytes() == metrics_before
 
 def test_resume_rejects_completion_marker_with_missing_output_hash(tmp_path):
     import json

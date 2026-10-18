@@ -1108,6 +1108,13 @@ def run_benchmark_job(
     output_root = Path(output_root)
     config_path = Path(config_path)
 
+    if not config_path.is_file():
+        raise FileNotFoundError(
+            f"Benchmark configuration does not exist: {config_path}"
+        )
+
+    requested_job = asdict(job)
+    requested_config_sha256 = _sha256_file(config_path)
     final_dir = output_root / job.experiment_id
     marker = final_dir / "completed.json"
 
@@ -1118,6 +1125,9 @@ def run_benchmark_job(
 
             valid = (
                 marker_data.get("experiment_id") == job.experiment_id
+                and marker_data.get("job") == requested_job
+                and marker_data.get("config_sha256")
+                == requested_config_sha256
                 and isinstance(expected_hashes, dict)
                 and set(expected_hashes) == set(BENCHMARK_OUTPUT_NAMES)
             )
@@ -1517,6 +1527,8 @@ def run_benchmark_job(
                     "peak_memory_bytes": peak_memory_bytes,
                     "detection": asdict(evaluation),
                     "output_hashes": output_hashes,
+                    "job": asdict(job),
+                    "config_sha256": requested_config_sha256,
                 },
             )
 
