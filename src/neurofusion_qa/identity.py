@@ -1211,24 +1211,27 @@ def check_i6_metric_denominator_traceability(
         # -----------------------------------------------------
         # I6.2 Denominator validity
         # -----------------------------------------------------
-        if denominator is None or denominator <= 0:
+        denominator_valid = (
+            isinstance(denominator, int)
+            and not isinstance(denominator, bool)
+            and denominator > 0
+        )
+
+        if not denominator_valid:
             findings.append(
                 Finding(
                     rule_id="I6.invalid_denominator",
                     severity="ERROR",
                     message=(
-                        "The metric denominator is missing or "
-                        "not positive."
+                        "The metric denominator must be a positive integer."
                     ),
                     key_type="metric",
                     affected_keys=[metric_name],
-                    expected="Metric denominator is greater than zero.",
-                    observed={
-                        "denominator": denominator,
-                    },
+                    expected="Metric denominator is a positive integer.",
+                    observed={"denominator": denominator},
                     evidence_rows=[metric_index],
                     remediation=(
-                        "Provide the actual positive denominator "
+                        "Provide the actual positive integer denominator "
                         "used to calculate the metric."
                     ),
                 )
@@ -1237,52 +1240,54 @@ def check_i6_metric_denominator_traceability(
         # -----------------------------------------------------
         # I6.3 Numerator validity
         # -----------------------------------------------------
-        if numerator is None:
+        numerator_valid = (
+            isinstance(numerator, int)
+            and not isinstance(numerator, bool)
+            and numerator >= 0
+        )
+
+        if not numerator_valid:
             findings.append(
                 Finding(
                     rule_id="I6.invalid_numerator",
                     severity="ERROR",
-                    message="The metric numerator is missing.",
+                    message=(
+                        "The metric numerator must be a non-negative integer."
+                    ),
                     key_type="metric",
                     affected_keys=[metric_name],
-                    expected="Metric numerator is explicitly recorded.",
-                    observed={
-                        "numerator": numerator,
-                    },
+                    expected="Metric numerator is a non-negative integer.",
+                    observed={"numerator": numerator},
                     evidence_rows=[metric_index],
                     remediation=(
-                        "Record the numerator used to calculate "
-                        "the metric."
+                        "Record the non-negative integer numerator "
+                        "used to calculate the metric."
                     ),
                 )
             )
-
-        elif denominator is not None and denominator > 0:
-            if numerator < 0 or numerator > denominator:
-                findings.append(
-                    Finding(
-                        rule_id="I6.invalid_numerator",
-                        severity="ERROR",
-                        message=(
-                            "The metric numerator is outside the "
-                            "valid range defined by its denominator."
-                        ),
-                        key_type="metric",
-                        affected_keys=[metric_name],
-                        expected=(
-                            "0 <= numerator <= denominator."
-                        ),
-                        observed={
-                            "numerator": numerator,
-                            "denominator": denominator,
-                        },
-                        evidence_rows=[metric_index],
-                        remediation=(
-                            "Correct the numerator or denominator "
-                            "to match the recorded metric population."
-                        ),
-                    )
+        elif denominator_valid and numerator > denominator:
+            findings.append(
+                Finding(
+                    rule_id="I6.invalid_numerator",
+                    severity="ERROR",
+                    message=(
+                        "The metric numerator is outside the "
+                        "valid range defined by its denominator."
+                    ),
+                    key_type="metric",
+                    affected_keys=[metric_name],
+                    expected="0 <= numerator <= denominator.",
+                    observed={
+                        "numerator": numerator,
+                        "denominator": denominator,
+                    },
+                    evidence_rows=[metric_index],
+                    remediation=(
+                        "Correct the numerator or denominator "
+                        "to match the recorded metric population."
+                    ),
                 )
+            )
 
         # -----------------------------------------------------
         # I6.4 Denominator traceability

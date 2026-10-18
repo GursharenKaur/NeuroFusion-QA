@@ -390,6 +390,8 @@ The implementation checks:
 6. The declared denominator equals the number of unique person keys in the
    declared population.
 
+**Numeric input validation convention:** The I6 audit accepts only integer numerators and denominators; booleans are explicitly rejected even though Python treats them as integers. The numerator must be non-negative, and the denominator must be positive. Invalid values produce `I6.invalid_numerator` or `I6.invalid_denominator` findings instead of being used in numeric comparisons. This is an implementation-hardening convention introduced because the handoff did not specify behavior for malformed numeric inputs.
+
 For C6, the corruption generator selects a traceable metric and changes only
 its declared denominator. Population membership, numerator, metric identity,
 and population key remain unchanged. The resulting mismatch is therefore

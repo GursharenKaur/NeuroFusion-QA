@@ -1159,6 +1159,63 @@ def test_i6_detects_nonpositive_denominator():
 import pytest
 
 
+@pytest.mark.parametrize("denominator", ["2", 2.5, True, False, None])
+def test_i6_rejects_invalid_denominator_types(denominator):
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+        )
+    ]
+    populations = {
+        "test_population_v1": [("test", "1.0", "sub-01")]
+    }
+    metrics = [{
+        "metric_name": "accuracy",
+        "numerator": 0,
+        "denominator": denominator,
+        "population_key": "test_population_v1",
+    }]
+
+    findings = check_i6_metric_denominator_traceability(
+        records, metrics, populations
+    )
+
+    assert any(
+        finding.rule_id == "I6.invalid_denominator"
+        for finding in findings
+    )
+
+
+@pytest.mark.parametrize("numerator", ["0", 0.5, True, False, None])
+def test_i6_rejects_invalid_numerator_types(numerator):
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+        )
+    ]
+    populations = {
+        "test_population_v1": [("test", "1.0", "sub-01")]
+    }
+    metrics = [{
+        "metric_name": "accuracy",
+        "numerator": numerator,
+        "denominator": 1,
+        "population_key": "test_population_v1",
+    }]
+
+    findings = check_i6_metric_denominator_traceability(
+        records, metrics, populations
+    )
+
+    assert any(
+        finding.rule_id == "I6.invalid_numerator"
+        for finding in findings
+    )
+
 @pytest.mark.parametrize(
     "participant_id",
     ["", "  ", "sub", "sub-", "sub_"],
