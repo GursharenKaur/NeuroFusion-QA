@@ -279,6 +279,12 @@ replace the raw participant identifier in the manifest.
 This is an implementation convention rather than a requirement explicitly
 specified by the research handoff.
 
+### I2 — Join-cardinality input validation
+
+**Implementation convention:** Both left-side and right-side join counts must be positive integers. Boolean values are rejected even though Python treats them as integer subclasses. Non-integer, zero, or negative counts raise `ValueError` before cardinality findings are generated.
+
+For valid counts, the checker evaluates the declared `one_to_one`, `one_to_many`, or `many_to_one` relation. Unmatched keys and many-to-many joins continue to be reported as errors. The checker rejects `many_to_many` as an unsupported declared relation.
+
 ### I3 — Cross-modal pairing convention
 
 The protocol specifies that cross-modal pairing must use the same

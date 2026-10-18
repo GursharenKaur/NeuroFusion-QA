@@ -658,6 +658,20 @@ def check_i2_join_cardinality(
         raise ValueError(
             f"Unsupported join relation: {relation!r}"
         )
+    for side, counts in (
+        ("left", left_counts),
+        ("right", right_counts),
+    ):
+        for key, count in counts.items():
+            if isinstance(count, bool) or not isinstance(count, int):
+                raise ValueError(
+                    f"{side} count for key {key!r} must be an integer."
+                )
+
+            if count < 1:
+                raise ValueError(
+                    f"{side} count for key {key!r} must be positive."
+                )
 
     findings: list[Finding] = []
 

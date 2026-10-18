@@ -401,6 +401,25 @@ def test_i2_rejects_undeclared_relation():
     else:
         raise AssertionError("Expected ValueError")
 
+@pytest.mark.parametrize("invalid_count", [0, -1])
+def test_i2_rejects_non_positive_counts(invalid_count):
+    with pytest.raises(ValueError, match="must be positive"):
+        check_i2_join_cardinality(
+            {"sub-01": invalid_count},
+            {"sub-01": 1},
+            relation="one_to_one",
+        )
+
+
+@pytest.mark.parametrize("invalid_count", [True, False, 1.5, "2"])
+def test_i2_rejects_non_integer_counts(invalid_count):
+    with pytest.raises(ValueError, match="must be an integer"):
+        check_i2_join_cardinality(
+            {"sub-01": invalid_count},
+            {"sub-01": 1},
+            relation="one_to_one",
+        )
+
 def test_i3_same_person_cross_modal_pair_is_clean():
     left = ManifestRecord(
         dataset_namespace="ds000117",
