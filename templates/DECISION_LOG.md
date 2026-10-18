@@ -88,6 +88,7 @@ Copy this block for every scientific, data, model, authorship, or submission dec
 - **Decision status:** Student implementation convention; PI approval pending.
 - **Protocol basis:** The protocol requires traceable metric populations and explicit denominators but does not define a concrete serialized analysis-output schema.
 - **Convention implemented:** Metrics reference a `population_key` and declared denominator; populations contain explicit person keys. Checks cover population-key presence and existence, positive denominator, numerator bounds, population-member representation in audited records, and equality between the declared denominator and the number of unique person keys. C6 changes only the declared denominator.
+- **Subsequent hardening:** The I6 audit accepts integer numerators and denominators only, rejects booleans explicitly, requires a non-negative numerator and a positive denominator, and emits `I6.invalid_numerator` or `I6.invalid_denominator` findings for invalid values. This input-validation behavior is an implementation-hardening convention added because the handoff did not specify malformed numeric-input behavior; it supplements the original metric-denominator convention.
 - **Rationale:** Make denominator validation deterministic and allow the C6 corruption to isolate the denominator mismatch.
 - **Alternatives considered at the time:** Not established by the available historical record.
 - **Evidence:** `docs/IDENTITYGUARD_METHOD.md`, consolidated implementation conventions in commit `8ba7797` (2026-09-30).
