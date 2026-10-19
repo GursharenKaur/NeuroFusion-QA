@@ -77,13 +77,61 @@ def validate_checkpoint_identity(
         )
 
 
+def _validate_checkpoint_progress(
+    checkpoint: dict,
+    selected_experiment_ids: list[str],
+) -> None:
+    """Validate progress records before allowing a checkpoint to be resumed."""
+    completed = checkpoint.get("completed_results")
+    failures = checkpoint.get("failures")
+    if not isinstance(completed, list) or not isinstance(failures, list):
+        raise RuntimeError(
+            "Checkpoint progress must contain completed_results and failures lists."
+        )
+
+    selected = set(selected_experiment_ids)
+    completed_ids: list[str] = []
+    failure_ids: list[str] = []
+
+    for item in completed:
+        if not isinstance(item, dict):
+            raise RuntimeError("Checkpoint completed result must be a JSON object.")
+        experiment_id = item.get("experiment_id")
+        if not isinstance(experiment_id, str) or experiment_id not in selected:
+            raise RuntimeError(
+                "Checkpoint contains a completed result outside the selected job list."
+            )
+        if not isinstance(item.get("output_hashes"), dict):
+            raise RuntimeError(
+                f"Checkpoint result for {experiment_id} has no output hash mapping."
+            )
+        completed_ids.append(experiment_id)
+
+    for item in failures:
+        if not isinstance(item, dict):
+            raise RuntimeError("Checkpoint failure record must be a JSON object.")
+        experiment_id = item.get("experiment_id")
+        if not isinstance(experiment_id, str) or experiment_id not in selected:
+            raise RuntimeError(
+                "Checkpoint contains a failure outside the selected job list."
+            )
+        failure_ids.append(experiment_id)
+
+    if len(completed_ids) != len(set(completed_ids)):
+        raise RuntimeError("Checkpoint contains duplicate completed job records.")
+    if len(failure_ids) != len(set(failure_ids)):
+        raise RuntimeError("Checkpoint contains duplicate failure records.")
+    if set(completed_ids) & set(failure_ids):
+        raise RuntimeError("Checkpoint marks the same job both completed and failed.")
+
+
 def initialize_checkpoint(
     output_root: Path,
     config_sha256: str,
     selected_experiment_ids: list[str],
     mode: str,
 ) -> dict:
-    """Create or validate progress metadata for this exact job selection."""
+    """Create a checkpoint or safely load matching progress for recovery."""
     checkpoint_path = output_root / "run_checkpoint.json"
 
     if checkpoint_path.exists():
@@ -104,11 +152,10 @@ def initialize_checkpoint(
             config_sha256,
             selected_experiment_ids,
         )
-        raise RuntimeError(
-            "A matching checkpoint already exists. Automatic recovery is not "
-            "implemented yet; preserve it and move it aside before starting "
-            "a fresh run."
-        )
+        if checkpoint.get("mode") != mode:
+            raise RuntimeError("Checkpoint run mode differs from the current mode.")
+        _validate_checkpoint_progress(checkpoint, selected_experiment_ids)
+        return checkpoint
 
     now = datetime.now(timezone.utc).isoformat()
     return {
@@ -306,6 +353,12 @@ def main() -> int:
             f"[{index}/{len(jobs)}] {job.experiment_id}",
             flush=True,
         )
+        # Retry prior failures. run_benchmark_job validates any existing per-job
+        # completion marker and all artifact hashes before reusing its outputs.
+        failures[:] = [
+            item for item in failures
+            if item.get("experiment_id") != job.experiment_id
+        ]
         try:
             result = run_benchmark_job(
                 job,
@@ -313,15 +366,26 @@ def main() -> int:
                 config_path=config_path,
                 resume=not args.no_resume,
             )
-            results.append({
+            result_record = {
                 "experiment_id": result.experiment_id,
                 "job_directory": result.job_directory,
                 "runtime_seconds": result.runtime_seconds,
                 "peak_memory_bytes": result.peak_memory_bytes,
                 "detection": result.detection,
                 "output_hashes": result.output_hashes,
-            })
+            }
+            # Replace rather than append so interrupted/retried runs cannot
+            # duplicate completed-result entries in the checkpoint or summary.
+            results[:] = [
+                item for item in results
+                if item.get("experiment_id") != result.experiment_id
+            ]
+            results.append(result_record)
         except Exception as exc:
+            results[:] = [
+                item for item in results
+                if item.get("experiment_id") != job.experiment_id
+            ]
             failures.append({
                 "experiment_id": job.experiment_id,
                 "error_type": type(exc).__name__,

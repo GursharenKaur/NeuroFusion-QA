@@ -1,4 +1,4 @@
-
+﻿
 import json
 
 import pytest
@@ -96,17 +96,53 @@ def test_checkpoint_is_written_as_valid_json(tmp_path):
     assert not (tmp_path / ".run_checkpoint.json.tmp").exists()
 
 
-def test_existing_checkpoint_is_not_silently_overwritten(tmp_path):
+def test_matching_checkpoint_is_loaded_for_recovery(tmp_path):
     original = {
         "schema_version": 1,
+        "run_id": "run-1",
+        "run_started_utc": "2026-10-19T00:00:00+00:00",
+        "updated_utc": "2026-10-19T00:01:00+00:00",
+        "mode": "subset",
         "config_sha256": "config-hash",
         "selected_experiment_ids": ["job-1"],
         "completed_results": [],
-        "failures": [],
+        "failures": [{
+            "experiment_id": "job-1",
+            "error_type": "ValueError",
+            "error": "temporary failure",
+        }],
     }
     path = write_checkpoint_atomic(tmp_path, original)
 
-    with pytest.raises(RuntimeError, match="already exists"):
+    recovered = initialize_checkpoint(
+        output_root=tmp_path,
+        config_sha256="config-hash",
+        selected_experiment_ids=["job-1"],
+        mode="subset",
+    )
+
+    assert recovered == original
+    assert json.loads(path.read_text(encoding="utf-8")) == original
+
+
+def test_checkpoint_rejects_duplicate_completed_records(tmp_path):
+    original = {
+        "schema_version": 1,
+        "run_id": "run-1",
+        "run_started_utc": "2026-10-19T00:00:00+00:00",
+        "updated_utc": "2026-10-19T00:01:00+00:00",
+        "mode": "subset",
+        "config_sha256": "config-hash",
+        "selected_experiment_ids": ["job-1"],
+        "completed_results": [
+            {"experiment_id": "job-1", "output_hashes": {}},
+            {"experiment_id": "job-1", "output_hashes": {}},
+        ],
+        "failures": [],
+    }
+    write_checkpoint_atomic(tmp_path, original)
+
+    with pytest.raises(RuntimeError, match="duplicate completed"):
         initialize_checkpoint(
             output_root=tmp_path,
             config_sha256="config-hash",
@@ -114,7 +150,55 @@ def test_existing_checkpoint_is_not_silently_overwritten(tmp_path):
             mode="subset",
         )
 
-    assert json.loads(path.read_text(encoding="utf-8")) == original
+
+def test_checkpoint_rejects_job_marked_both_completed_and_failed(tmp_path):
+    original = {
+        "schema_version": 1,
+        "run_id": "run-1",
+        "run_started_utc": "2026-10-19T00:00:00+00:00",
+        "updated_utc": "2026-10-19T00:01:00+00:00",
+        "mode": "subset",
+        "config_sha256": "config-hash",
+        "selected_experiment_ids": ["job-1"],
+        "completed_results": [
+            {"experiment_id": "job-1", "output_hashes": {}}
+        ],
+        "failures": [
+            {"experiment_id": "job-1", "error_type": "ValueError", "error": "x"}
+        ],
+    }
+    write_checkpoint_atomic(tmp_path, original)
+
+    with pytest.raises(RuntimeError, match="both completed and failed"):
+        initialize_checkpoint(
+            output_root=tmp_path,
+            config_sha256="config-hash",
+            selected_experiment_ids=["job-1"],
+            mode="subset",
+        )
+
+
+def test_checkpoint_rejects_mode_mismatch(tmp_path):
+    original = {
+        "schema_version": 1,
+        "run_id": "run-1",
+        "run_started_utc": "2026-10-19T00:00:00+00:00",
+        "updated_utc": "2026-10-19T00:01:00+00:00",
+        "mode": "smoke",
+        "config_sha256": "config-hash",
+        "selected_experiment_ids": ["job-1"],
+        "completed_results": [],
+        "failures": [],
+    }
+    write_checkpoint_atomic(tmp_path, original)
+
+    with pytest.raises(RuntimeError, match="mode differs"):
+        initialize_checkpoint(
+            output_root=tmp_path,
+            config_sha256="config-hash",
+            selected_experiment_ids=["job-1"],
+            mode="subset",
+        )
 
 
 from types import SimpleNamespace
@@ -339,3 +423,32 @@ def test_main_stops_after_post_job_checkpoint_failure(
     captured = capsys.readouterr()
     assert "Checkpoint persistence failed" in captured.err
     assert "simulated disk failure" in captured.err
+
+
+def test_main_resumes_checkpoint_without_duplicate_result_records(
+    tmp_path, monkeypatch
+):
+    config = tmp_path / "protocol.yaml"
+    _write_test_config(config)
+    output_root = tmp_path / "output"
+    jobs = [_fake_job("job-1"), _fake_job("job-2")]
+    monkeypatch.setattr(runner, "generate_benchmark_jobs", lambda **kwargs: jobs)
+    monkeypatch.setattr(
+        runner, "run_benchmark_job",
+        lambda job, **kwargs: _fake_result(job.experiment_id),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        ["run_collision_benchmark.py", "--config", str(config),
+         "--output-root", str(output_root), "--smoke", "--limit", "2"],
+    )
+
+    assert runner.main() == 0
+    assert runner.main() == 0
+
+    checkpoint = json.loads(
+        (output_root / "run_checkpoint.json").read_text(encoding="utf-8")
+    )
+    ids = [item["experiment_id"] for item in checkpoint["completed_results"]]
+    assert ids == ["job-1", "job-2"]
+    assert checkpoint["failures"] == []

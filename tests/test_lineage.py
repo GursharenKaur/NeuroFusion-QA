@@ -242,3 +242,91 @@ def test_i4_same_derivative_key_with_conflicting_hashes_is_reported():
         finding.rule_id == "I4.derivative_key_collision"
         for finding in findings
     )
+
+def test_i4_whitespace_recipe_hash_is_incomplete():
+    record = ManifestRecord(
+        dataset_namespace="test",
+        dataset_version="1.0",
+        participant_id="sub-01",
+        modality="bold",
+        derivative_recipe_sha256="   ",
+        derivative_path="derivatives/sub-01_bold.nii.gz",
+    )
+
+    findings = check_i4_derivative_lineage([record])
+
+    assert any(
+        finding.rule_id == "I4.derivative_lineage_incomplete"
+        and "derivative_recipe_sha256"
+        in finding.observed["missing_fields"]
+        for finding in findings
+    )
+
+
+def test_i4_whitespace_derivative_path_is_incomplete():
+    record = ManifestRecord(
+        dataset_namespace="test",
+        dataset_version="1.0",
+        participant_id="sub-01",
+        modality="bold",
+        derivative_recipe_sha256="recipe123",
+        derivative_path="   ",
+    )
+
+    findings = check_i4_derivative_lineage([record])
+
+    assert any(
+        finding.rule_id == "I4.derivative_lineage_incomplete"
+        and "derivative_path" in finding.observed["missing_fields"]
+        for finding in findings
+    )
+
+
+def test_i4_whitespace_parent_namespace_is_missing():
+    record = ManifestRecord(
+        dataset_namespace="   ",
+        dataset_version="1.0",
+        participant_id="sub-01",
+        modality="bold",
+        derivative_recipe_sha256="recipe123",
+        derivative_path="derivatives/sub-01_bold.nii.gz",
+    )
+
+    findings = check_i4_derivative_lineage([record])
+
+    assert any(
+        finding.rule_id == "I4.missing_parent_acquisition"
+        and "dataset_namespace"
+        in finding.observed["missing_parent_fields"]
+        for finding in findings
+    )
+
+
+def test_i4_unavailable_hash_does_not_create_hash_collision():
+    record_with_hash = ManifestRecord(
+        dataset_namespace="test",
+        dataset_version="1.0",
+        participant_id="sub-01",
+        modality="bold",
+        derivative_recipe_sha256="recipe123",
+        derivative_path="derivatives/sub-01_bold.nii.gz",
+        derivative_sha256="hash_a",
+    )
+    record_without_hash = ManifestRecord(
+        dataset_namespace="test",
+        dataset_version="1.0",
+        participant_id="sub-01",
+        modality="bold",
+        derivative_recipe_sha256="recipe123",
+        derivative_path="derivatives/sub-01_bold.nii.gz",
+        derivative_sha256="not_retrieved",
+    )
+
+    findings = check_i4_derivative_lineage(
+        [record_with_hash, record_without_hash]
+    )
+
+    assert not any(
+        finding.rule_id == "I4.derivative_key_collision"
+        for finding in findings
+    )

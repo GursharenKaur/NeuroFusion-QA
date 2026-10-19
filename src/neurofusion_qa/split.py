@@ -5,6 +5,25 @@ from typing import Any
 
 from .identity import Finding
 
+def _normalized_split(value: Any) -> str | None:
+    """Return a trimmed split label, or None if it is missing/blank."""
+    if value is None:
+        return None
+
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _usable_hash(value: Any) -> str | None:
+    """Return a usable hash value, excluding missing and unavailable values."""
+    if value is None:
+        return None
+
+    normalized = str(value).strip()
+    if not normalized or normalized == "not_retrieved":
+        return None
+
+    return normalized
 
 def check_i5_person_split_independence(
     records: list[Any],
@@ -15,10 +34,11 @@ def check_i5_person_split_independence(
     grouped: dict[Any, set[str]] = defaultdict(set)
 
     for record in records:
-        if record.split is None:
+        split = _normalized_split(record.split)
+        if split is None:
             continue
 
-        grouped[record.person_key].add(record.split)
+        grouped[record.person_key].add(split)
 
     findings: list[Finding] = []
 
@@ -66,14 +86,13 @@ def check_i5_source_hash_split_independence(
     )
 
     for record in records:
-        if (
-            record.source_sha256 is None
-            or record.source_sha256 == "not_retrieved"
-            or record.split is None
-        ):
+        split = _normalized_split(record.split)
+        source_hash = _usable_hash(record.source_sha256)
+
+        if split is None or source_hash is None:
             continue
 
-        grouped[record.source_sha256][record.split].append(record)
+        grouped[source_hash][split].append(record)
 
     findings: list[Finding] = []
 
@@ -134,14 +153,13 @@ def check_i5_derivative_hash_split_independence(
     )
 
     for record in records:
-        if (
-            record.derivative_sha256 is None
-            or record.derivative_sha256 == "not_retrieved"
-            or record.split is None
-        ):
+        split = _normalized_split(record.split)
+        derivative_hash = _usable_hash(record.derivative_sha256)
+
+        if split is None or derivative_hash is None:
             continue
 
-        grouped[record.derivative_sha256][record.split].append(record)
+        grouped[derivative_hash][split].append(record)
 
     findings: list[Finding] = []
 

@@ -1297,3 +1297,7 @@ def test_i1_acquisition_key_injectivity_detects_conflicting_retrieved_hashes():
     assert len(findings) == 1
     assert findings[0].rule_id == "I1.acquisition_key_injectivity"
     assert "conflicting retrieved hashes" in findings[0].message
+
+def test_canonicalize_participant_id_does_not_strip_sub_from_label():
+    assert canonicalize_participant_id("subject01") == "sub-subject01"
+    assert canonicalize_participant_id("submarine") == "sub-submarine"

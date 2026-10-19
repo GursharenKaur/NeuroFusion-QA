@@ -4,6 +4,26 @@ import re
 import unicodedata
 from typing import Any
 
+def _normalized_i5_split(value):
+    """Return a trimmed split label, or None if missing or blank."""
+    if value is None:
+        return None
+
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _usable_i5_hash(value):
+    """Return a usable hash, excluding missing or unavailable values."""
+    if value is None:
+        return None
+
+    normalized = str(value).strip()
+    if not normalized or normalized == "not_retrieved":
+        return None
+
+    return normalized
+
 @dataclass(frozen=True)
 class Finding:
     rule_id: str
@@ -190,7 +210,7 @@ def canonicalize_participant_id(participant_id: str) -> str:
     normalized = normalized.casefold().strip()
 
     # Remove the BIDS subject prefix and one or more separators.
-    label = re.sub(r"^sub[-_.\s]*", "", normalized)
+    label = re.sub(r"^sub(?:[-_.\s]+|$)", "", normalized)
 
     # Treat punctuation/separators as equivalent.
     label = re.sub(r"[-_.\s]+", "", label)
@@ -885,15 +905,17 @@ def check_i5_split_independence(
     person_splits = {}
 
     for index, record in enumerate(records):
-        split = getattr(record, "split", None)
+        split = _normalized_i5_split(
+            getattr(record, "split", None)
+        )
 
-        if split is None or str(split).strip() == "":
+        if split is None:
             continue
 
         person_key = record.person_key
 
         person_splits.setdefault(person_key, []).append(
-            (str(split), index)
+            (split, index)
         )
 
     for person_key, entries in person_splits.items():
@@ -933,20 +955,18 @@ def check_i5_split_independence(
     source_hash_splits = {}
 
     for index, record in enumerate(records):
-        split = getattr(record, "split", None)
-        source_hash = getattr(record, "source_sha256", None)
+        split = _normalized_i5_split(
+            getattr(record, "split", None)
+        )
+        source_hash = _usable_i5_hash(
+            getattr(record, "source_sha256", None)
+        )
 
-        if (
-            split is None
-            or str(split).strip() == ""
-            or source_hash is None
-            or source_hash == ""
-            or source_hash == "not_retrieved"
-        ):
+        if split is None or source_hash is None:
             continue
 
         source_hash_splits.setdefault(source_hash, []).append(
-            (str(split), index)
+            (split, index)
         )
 
     for source_hash, entries in source_hash_splits.items():
@@ -988,23 +1008,19 @@ def check_i5_split_independence(
     derivative_hash_splits = {}
 
     for index, record in enumerate(records):
-        split = getattr(record, "split", None)
-        derivative_hash = getattr(record, "derivative_sha256", None)
+        split = _normalized_i5_split(
+            getattr(record, "split", None)
+        )
+        derivative_hash = _usable_i5_hash(
+            getattr(record, "derivative_sha256", None)
+        )
 
-        if (
-            split is None
-            or str(split).strip() == ""
-            or derivative_hash is None
-            or derivative_hash == ""
-            or derivative_hash == "not_retrieved"
-        ):
+        if split is None or derivative_hash is None:
             continue
 
         derivative_hash_splits.setdefault(
             derivative_hash, []
-        ).append(
-            (str(split), index)
-        )
+        ).append((split, index))
 
     for derivative_hash, entries in derivative_hash_splits.items():
         splits = sorted({split for split, _ in entries})
@@ -1042,20 +1058,21 @@ def check_i5_split_independence(
     # ---------------------------------------------------------
     # I5.5 Explicit grouping-variable split leakage
     # ---------------------------------------------------------
+    record_splits_by_person = {}
+    for record in records:
+        split = _normalized_i5_split(
+            getattr(record, "split", None)
+        )
+
+        if split is None:
+            continue
+
+        record_splits_by_person.setdefault(
+            record.person_key,
+            set(),
+        ).add(split)
+
     if grouping_variables:
-        record_splits_by_person = {}
-
-        for record in records:
-            split = getattr(record, "split", None)
-
-            if split is None or str(split).strip() == "":
-                continue
-
-            record_splits_by_person.setdefault(
-                record.person_key,
-                set(),
-            ).add(str(split))
-
         for variable_name, groups in grouping_variables.items():
             for group_value, person_keys in groups.items():
                 group_splits = set()
@@ -1072,7 +1089,9 @@ def check_i5_split_independence(
                     for index, record in enumerate(records):
                         if (
                             record.person_key == person_key
-                            and getattr(record, "split", None)
+                            and _normalized_i5_split(
+                                getattr(record, "split", None)
+                            ) is not None
                         ):
                             evidence_rows.append(index)
 

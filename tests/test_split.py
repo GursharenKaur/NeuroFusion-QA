@@ -125,3 +125,63 @@ def test_i5_same_hash_within_same_split_is_clean():
     ]
 
     assert check_i5_source_hash_split_independence(records) == []
+
+def test_i5_whitespace_hash_is_not_leakage_evidence():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            source_sha256="   ",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            source_sha256="   ",
+            split="test",
+        ),
+    ]
+
+    assert check_i5_source_hash_split_independence(records) == []
+
+
+def test_i5_whitespace_split_is_not_a_distinct_split():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            split=" train ",
+        ),
+    ]
+
+    assert check_i5_person_split_independence(records) == []
+
+
+def test_i5_unavailable_derivative_hash_is_not_leakage_evidence():
+    records = [
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            derivative_sha256="not_retrieved",
+            split="train",
+        ),
+        ManifestRecord(
+            dataset_namespace="test",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            derivative_sha256="not_retrieved",
+            split="test",
+        ),
+    ]
+
+    assert check_i5_derivative_hash_split_independence(records) == []

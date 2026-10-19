@@ -1,6 +1,7 @@
 ﻿
 from __future__ import annotations
-
+import math
+from collections import Counter, defaultdict
 import argparse
 import csv
 import hashlib
@@ -155,6 +156,402 @@ def runtime_summary(group: list[dict]) -> dict:
     }
 
 
+PAIRING_FIELDS = (
+    "people",
+    "modalities",
+    "sessions",
+    "runs_per_modality",
+    "severity",
+    "seed",
+)
+
+BOOTSTRAP_RESAMPLES = 10_000
+BOOTSTRAP_CONFIDENCE = 0.95
+BOOTSTRAP_BASE_SEED = 20261019
+
+SCALING_MATCH_FIELDS = (
+    "corruption",
+    "modalities",
+    "sessions",
+    "runs_per_modality",
+    "severity",
+    "seed",
+)
+
+
+def _valid_measurement(value) -> bool:
+    """Accept finite, non-negative numeric measurements, excluding booleans."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= 0
+    )
+
+
+def _measurement_summary(rows: list[dict], field: str, prefix: str) -> dict:
+    """Summarize one measurement using the inclusive quartile convention."""
+    values = sorted(
+        row[field]
+        for row in rows
+        if _valid_measurement(row.get(field))
+    )
+
+    if not values:
+        return {
+            f"{prefix}_n": 0,
+            f"median_{prefix}": None,
+            f"{prefix}_q1": None,
+            f"{prefix}_q3": None,
+            f"{prefix}_iqr": None,
+        }
+
+    if len(values) == 1:
+        q1 = q3 = values[0]
+    else:
+        q1, _, q3 = quantiles(values, n=4, method="inclusive")
+
+    return {
+        f"{prefix}_n": len(values),
+        f"median_{prefix}": median(values),
+        f"{prefix}_q1": q1,
+        f"{prefix}_q3": q3,
+        f"{prefix}_iqr": q3 - q1,
+    }
+
+
+def runtime_scaling_summary(rows: list[dict]) -> dict:
+    """
+    Describe measured scaling across participant counts.
+
+    Only artifact-valid rows are eligible. Adjacent participant-count levels
+    are compared using matching corruption, modalities, sessions,
+    runs_per_modality, severity, and seed.
+
+    Ratios are larger-workload measurement / smaller-workload measurement.
+    Duplicate design keys are excluded from matched comparisons.
+    """
+    valid_rows = [
+        row for row in rows
+        if row.get("artifact_hashes_valid") is True
+        and isinstance(row.get("people"), int)
+        and not isinstance(row.get("people"), bool)
+        and row["people"] > 0
+    ]
+
+    by_people = defaultdict(list)
+    for row in valid_rows:
+        by_people[row["people"]].append(row)
+
+    descriptive = []
+    for people in sorted(by_people):
+        group = by_people[people]
+        item = {
+            "people": people,
+            "valid_jobs": len(group),
+        }
+        item.update(
+            _measurement_summary(group, "runtime_seconds", "runtime_seconds")
+        )
+        item.update(
+            _measurement_summary(group, "peak_memory_bytes", "peak_traced_python_bytes")
+        )
+        descriptive.append(item)
+
+    # Index each design configuration at each participant count.
+    indexed = defaultdict(list)
+    for row in valid_rows:
+        if not all(field in row and row[field] is not None
+                   for field in SCALING_MATCH_FIELDS):
+            continue
+
+        signature = tuple(row[field] for field in SCALING_MATCH_FIELDS)
+        indexed[(signature, row["people"])].append(row)
+
+    people_levels = sorted(by_people)
+    comparisons = []
+
+    for smaller, larger in zip(people_levels, people_levels[1:]):
+        runtime_ratios = []
+        memory_ratios = []
+        matched_configurations = 0
+        duplicate_configurations_excluded = 0
+
+        signatures = {
+            signature
+            for signature, people in indexed
+            if people in (smaller, larger)
+        }
+
+        for signature in signatures:
+            low_rows = indexed.get((signature, smaller), [])
+            high_rows = indexed.get((signature, larger), [])
+
+            if not low_rows or not high_rows:
+                continue
+
+            # A configuration must have exactly one job at each size.
+            if len(low_rows) != 1 or len(high_rows) != 1:
+                duplicate_configurations_excluded += 1
+                continue
+
+            low, high = low_rows[0], high_rows[0]
+            matched_configurations += 1
+
+            low_runtime = low.get("runtime_seconds")
+            high_runtime = high.get("runtime_seconds")
+            if (
+                _valid_measurement(low_runtime)
+                and _valid_measurement(high_runtime)
+                and low_runtime > 0
+            ):
+                runtime_ratios.append(high_runtime / low_runtime)
+
+            low_memory = low.get("peak_memory_bytes")
+            high_memory = high.get("peak_memory_bytes")
+            if (
+                _valid_measurement(low_memory)
+                and _valid_measurement(high_memory)
+                and low_memory > 0
+            ):
+                memory_ratios.append(high_memory / low_memory)
+
+        comparisons.append({
+            "smaller_people": smaller,
+            "larger_people": larger,
+            "matched_configurations": matched_configurations,
+            "duplicate_configurations_excluded": (
+                duplicate_configurations_excluded
+            ),
+            "runtime_ratio_n": len(runtime_ratios),
+            "median_runtime_ratio": (
+                median(runtime_ratios) if runtime_ratios else None
+            ),
+            "peak_traced_python_memory_ratio_n": len(memory_ratios),
+            "median_peak_traced_python_memory_ratio": (
+                median(memory_ratios) if memory_ratios else None
+            ),
+            "ratio_definition": (
+                "measurement at larger_people divided by measurement "
+                "at smaller_people"
+            ),
+            "status": (
+                "calculated"
+                if runtime_ratios or memory_ratios
+                else "insufficient_valid_matched_measurements"
+            ),
+        })
+
+    return {
+        "method": (
+            "Descriptive measurements by participant count and matched "
+            "ratios between adjacent observed participant-count levels"
+        ),
+        "eligible_jobs": len(valid_rows),
+        "participant_count_levels": people_levels,
+        "by_people_count": descriptive,
+        "adjacent_size_comparisons": comparisons,
+        "matching_fields": list(SCALING_MATCH_FIELDS),
+        "memory_measurement": (
+            "peak traced Python allocations reported by tracemalloc; "
+            "not total process RSS or system memory"
+        ),
+        "limitations": (
+            "Empirical descriptive scaling only; no computational "
+            "complexity model is fitted. Missing or invalid measurements, "
+            "zero denominators, unmatched configurations, and ambiguous "
+            "duplicate configurations are not used to calculate ratios."
+        ),
+    }
+
+def _percentile(sorted_values: list[float], probability: float) -> float:
+    """Linear-interpolated percentile of an already sorted sequence."""
+    if not sorted_values:
+        raise ValueError("Cannot calculate a percentile from empty data.")
+
+    position = (len(sorted_values) - 1) * probability
+    lower = int(position)
+    upper = min(lower + 1, len(sorted_values) - 1)
+    fraction = position - lower
+
+    return (
+        sorted_values[lower] * (1.0 - fraction)
+        + sorted_values[upper] * fraction
+    )
+
+
+def paired_bootstrap_comparisons(
+    rows: list[dict],
+    *,
+    n_resamples: int = BOOTSTRAP_RESAMPLES,
+    base_seed: int = BOOTSTRAP_BASE_SEED,
+) -> dict:
+    """
+    Compare corruption types using matched synthetic benchmark conditions.
+
+    Pairing unit: a matched design block identified by
+    people count, modalities, sessions, runs_per_modality, severity, and seed.
+    The same affected subjects or records are not necessarily paired.
+    Difference is corruption_a's rate minus corruption_b's rate.
+    Confidence intervals are percentile bootstrap intervals over matched
+    blocks, with replacement.
+    """
+    import random
+    from itertools import combinations
+
+    if n_resamples < 1:
+        raise ValueError("n_resamples must be at least 1.")
+
+    valid_rows = [
+        row for row in rows
+        if row.get("artifact_hashes_valid") is True
+    ]
+
+    corruption_names = sorted({
+        row.get("corruption")
+        for row in valid_rows
+        if isinstance(row.get("corruption"), str)
+        and row["corruption"]
+    })
+
+    metrics = {
+        "expected_violation_detected": "expected_violation_detection_rate",
+        "failure_type_correct": "failure_type_accuracy",
+    }
+
+    comparisons = []
+
+    for comparison_index, (corruption_a, corruption_b) in enumerate(
+        combinations(corruption_names, 2)
+    ):
+        # Build a list per key so duplicate records cannot silently
+        # become arbitrary matches.
+        indexed = {}
+        for corruption in (corruption_a, corruption_b):
+            indexed[corruption] = {}
+
+            for row in valid_rows:
+                if row.get("corruption") != corruption:
+                    continue
+
+                values = tuple(row.get(field) for field in PAIRING_FIELDS)
+
+                # Missing design fields cannot establish a valid pair.
+                if any(value is None for value in values):
+                    continue
+
+                indexed[corruption].setdefault(values, []).append(row)
+
+        keys_a = indexed[corruption_a]
+        keys_b = indexed[corruption_b]
+
+        duplicate_keys = {
+            key
+            for key in set(keys_a) | set(keys_b)
+            if len(keys_a.get(key, [])) > 1
+            or len(keys_b.get(key, [])) > 1
+        }
+
+        matched_keys = sorted(
+            (
+                set(keys_a) & set(keys_b)
+            ) - duplicate_keys,
+            key=repr,
+        )
+
+        for metric_index, (metric_field, metric_name) in enumerate(
+            metrics.items()
+        ):
+            differences = []
+
+            for key in matched_keys:
+                value_a = keys_a[key][0].get(metric_field)
+                value_b = keys_b[key][0].get(metric_field)
+
+                # Do not coerce missing or non-boolean outcomes.
+                if type(value_a) is not bool or type(value_b) is not bool:
+                    continue
+
+                differences.append(
+                    float(value_a) - float(value_b)
+                )
+
+            pair_count = len(differences)
+            estimate = (
+                sum(differences) / pair_count
+                if pair_count
+                else None
+            )
+
+            interval = None
+            status = "insufficient_pairs"
+
+            # A single pair can give a point estimate, but not a useful
+            # empirical bootstrap interval.
+            if pair_count >= 2:
+                rng = random.Random(
+                    base_seed + comparison_index * len(metrics)
+                    + metric_index
+                )
+                bootstrap_estimates = []
+
+                for _ in range(n_resamples):
+                    sample_sum = sum(
+                        differences[rng.randrange(pair_count)]
+                        for _ in range(pair_count)
+                    )
+                    bootstrap_estimates.append(sample_sum / pair_count)
+
+                bootstrap_estimates.sort()
+                alpha = 1.0 - BOOTSTRAP_CONFIDENCE
+
+                interval = [
+                    _percentile(bootstrap_estimates, alpha / 2),
+                    _percentile(bootstrap_estimates, 1 - alpha / 2),
+                ]
+                status = "calculated"
+
+            comparisons.append({
+                "corruption_a": corruption_a,
+                "corruption_b": corruption_b,
+                "metric": metric_name,
+                "difference_definition": (
+                    f"{corruption_a} rate minus {corruption_b} rate"
+                ),
+                "matched_design_blocks": pair_count,
+                "duplicate_design_keys_excluded": len(duplicate_keys),
+                "mean_paired_difference": estimate,
+                "confidence_level": BOOTSTRAP_CONFIDENCE,
+                "confidence_interval": interval,
+                "status": status,
+                "resamples": n_resamples if pair_count >= 2 else 0,
+                "random_seed": (
+                    base_seed + comparison_index * len(metrics)
+                    + metric_index
+                    if pair_count >= 2 else None
+                ),
+            })
+
+    return {
+        "method": "paired percentile bootstrap",
+        "pairing_unit": (
+            "matched design block: same people count, modalities, sessions, "
+            "runs_per_modality, severity, and seed across corruption types; "
+            "the same affected subjects or records are not guaranteed"
+        ),
+        "pairing_fields": list(PAIRING_FIELDS),
+        "confidence_level": BOOTSTRAP_CONFIDENCE,
+        "resamples": n_resamples,
+        "base_random_seed": base_seed,
+        "interval_method": "two-sided percentile interval with linear interpolation",
+        "difference_scale": "absolute rate difference, from -1 to 1",
+        "missing_or_duplicate_pairs": (
+            "Missing design fields, missing/non-boolean outcomes, unmatched "
+            "keys, and ambiguous duplicate keys are not used as pairs."
+        ),
+        "comparisons": comparisons,
+    }
+
 def summarize_group(group: list[dict]) -> dict:
     jobs = len(group)
     detected = sum(r["expected_violation_detected"] is True for r in group)
@@ -241,6 +638,9 @@ def main() -> int:
         if row["artifact_hashes_valid"]:
             groups[row["corruption"]].append(row)
 
+    paired_bootstrap = paired_bootstrap_comparisons(rows)
+    runtime_scaling = runtime_scaling_summary(rows)
+
     summary = {
         "input_root": str(input_root),
         "completed_directories_found": len(job_dirs),
@@ -252,11 +652,26 @@ def main() -> int:
             for corruption, group in sorted(groups.items())
         },
         "invalid_job_details": invalid_jobs,
+        "paired_bootstrap": paired_bootstrap,
+        "runtime_scaling": runtime_scaling,
         "statistical_methods": {
-            "binomial_confidence_interval": "two-sided Clopper-Pearson exact, 95%",
-            "runtime_quantiles": "inclusive linear interpolation; median and IQR",
-            "paired_bootstrap": "not calculated; comparison unit not yet specified",
-            "runtime_scaling": "not calculated; scaling model and aggregation unit not yet specified",
+            "binomial_confidence_interval": (
+                "two-sided Clopper-Pearson exact, 95%"
+            ),
+            "runtime_quantiles": (
+                "inclusive linear interpolation; median and IQR"
+            ),
+            "paired_bootstrap": (
+                "10,000 paired percentile bootstrap resamples; "
+                "matched design conditions and seed; fixed random seed; "
+                "absolute difference in rates"
+            ),
+            "runtime_scaling": (
+                "Descriptive median and inclusive IQR by participant count; "
+                "adjacent observed sizes compared by matched configuration "
+                "ratios. Memory refers to peak traced Python allocations, "
+                "not process RSS."
+            ),
         },
         "note": (
             "Aggregates include only jobs whose required artifacts passed "

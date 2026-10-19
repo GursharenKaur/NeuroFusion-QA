@@ -106,6 +106,8 @@ Examples:
 | `sub.01` | `sub-1` |
 | `sub-A01` | `sub-a01` |
 
+**Implementation convention — BIDS subject-prefix handling:** Participant IDs are normalized using Unicode NFKC normalization, case folding, and trimming. The leading `sub` prefix is removed only when it is followed by one or more recognized separators (`-`, `_`, `.`, or whitespace), or when the complete normalized value is exactly `sub`. The remaining label is canonicalized according to the documented separator and numeric-label rules. Thus, `sub-01`, `sub_01`, and `sub 01` can normalize to the same participant label, while `subject01` and `submarine` retain their full labels. This prefix-handling rule is an implementation convention chosen to make the previously underspecified behavior explicit; it is not represented as a requirement from the original handoff.
+
 Collision detection is performed within the namespace-qualified dataset
 identity `(dataset_namespace, dataset_version)`. Therefore identical raw
 labels occurring in different dataset namespaces are not treated as
@@ -263,8 +265,7 @@ convention for audit purposes:
 1. Unicode normalization uses NFKC.
 2. Participant labels are case-folded.
 3. Leading/trailing whitespace is removed.
-4. A leading `sub`/`sub-`/`sub_`/`sub.` prefix is normalized away before
-   canonicalization.
+4. A leading `sub` prefix is removed only when it is followed by one or more recognized separators (hyphen, underscore, period, or whitespace), or when it appears by itself. Ordinary labels beginning with `sub`, such as `subject01` and `submarine`, are not stripped.
 5. Hyphens, underscores, periods, and whitespace within the participant
    label are treated as equivalent separators.
 6. Numeric identifiers are normalized by removing leading zeroes.
@@ -284,39 +285,6 @@ specified by the research handoff.
 **Implementation convention:** Both left-side and right-side join counts must be positive integers. Boolean values are rejected even though Python treats them as integer subclasses. Non-integer, zero, or negative counts raise `ValueError` before cardinality findings are generated.
 
 For valid counts, the checker evaluates the declared `one_to_one`, `one_to_many`, or `many_to_one` relation. Unmatched keys and many-to-many joins continue to be reported as errors. The checker rejects `many_to_many` as an unsupported declared relation.
-
-### I3 — Cross-modal pairing convention
-
-The protocol specifies that cross-modal pairing must use the same
-namespace-qualified person key unless an authoritative crosswalk is supplied,
-and that cross-dataset identity must never be inferred from string similarity.
-
-The following concrete implementation convention is used:
-
-1. Pairing input consists of explicit record pairs.
-2. Without an authoritative crosswalk, the two records must have identical
-   namespace-qualified person keys.
-3. Cross-dataset pairing is permitted only when an explicit
-   `AuthoritativeCrosswalk` is supplied.
-4. The crosswalk contains:
-   - source
-   - version
-   - SHA-256 hash
-   - approver
-   - approval date
-   - explicit mapping between namespace-qualified person keys.
-5. Session compatibility requires either equal explicit session identifiers
-   or both values being absent.
-6. Task compatibility follows the same rule.
-7. A valid cross-modal pair requires two explicit and different modality
-   values.
-8. Participant-string similarity is never used to infer identity.
-
-These choices make the pairing rule deterministic and auditable.
-
-The exact pair-table representation and session/task compatibility semantics
-were not fully specified in the handoff; the rules above are therefore
-implementation conventions.
 
 ### I4 — Derivative key convention
 
@@ -340,6 +308,17 @@ The derivative lineage audit then:
 5. Reports identical derivative hashes appearing under different acquisition
    keys.
 6. Reports repeated source paths and exact repeated rows.
+
+Required derivative recipe hashes and output paths must be non-empty
+strings after whitespace trimming. The required parent identity fields
+(dataset namespace, dataset version, and participant ID) follow the same
+non-empty-string convention. Optional BIDS entities such as session, task,
+acquisition, and run may remain absent.
+
+Hash comparisons exclude missing and `not_retrieved` derivative hashes.
+An unavailable hash is not treated as a conflicting hash, but it also does
+not establish that the derivative content has been verified. Repeated-path
+detection compares the exact source path strings recorded in the manifest.
 
 This tuple and the associated missing-lineage handling are implementation
 conventions introduced because the handoff did not specify the exact
@@ -679,13 +658,107 @@ These execution, provenance, and measurement details are implementation conventi
 
 Current verification checkpoint:
 
-- Synthetic benchmark tests: 33 passed
-- Full test suite: 165 passed
+- Full test suite: 267 passed (19 October 2026).
+- Fresh six-job smoke run: 6 completed, 6 valid, 0 invalid.
+- The smoke run covered C1-C6, with one job per corruption scenario
+  at 16 participants.
+- Required artifacts and recorded hashes passed summary validation
+  for all six fresh smoke jobs.
 
-The three-modality C2 and C3 smoke jobs completed successfully, with their ten required artifact hashes independently verified. These are implementation smoke tests, not factorial benchmark results.
+Earlier three-modality C2 and C3 smoke tests were also used to verify
+implementation behavior and resume handling. These checks are implementation
+smoke tests, not factorial benchmark results.
 
-The C1–C6 benchmark tests verify detection of declared primary violations and benchmark evaluation of expected failure types.
+The C1-C6 benchmark tests verify detection of declared primary violations
+and benchmark evaluation of expected failure types. Smoke-test results do
+not establish full-benchmark performance or population-level conclusions.
+Factorial benchmark execution and aggregate performance reporting remain
+a separate experimental stage.
 
-No aggregate benchmark performance results are represented by these tests or smoke jobs. Factorial benchmark execution and aggregate performance reporting remain a separate experimental stage.
+### Runtime Scaling Summary
 
-The three-modality C2 and C3 smoke jobs completed successfully. Their metrics include parent-manifest and configuration hashes, code provenance, rule outputs, and detection/localization results. All ten required artifact hashes per job were independently verified. Resume verification confirmed that completed jobs were reused without changing their completion markers. These are implementation smoke tests, not factorial benchmark results.
+The implemented runtime-scaling analysis reports descriptive median and
+inclusive interquartile range (IQR) for runtime and peak traced Python
+allocations at each observed participant-count level. It also calculates
+measurement ratios between adjacent observed participant-count levels for
+matched configurations.
+
+Matching uses corruption, modalities, sessions, runs per modality, severity,
+and seed. Invalid or missing measurements, zero denominators, unmatched
+configurations, and ambiguous duplicate configurations are excluded from
+ratio calculations. The implementation does not fit a computational
+complexity model.
+
+In the fresh six-job smoke run, all jobs used 16 participants. The summary
+therefore reports descriptive measurements for one participant-count level
+and no adjacent-size comparisons. These observations validate the reporting
+path; they do not demonstrate a scaling trend.
+
+The runtime and memory summaries are implementation analysis conventions.
+Runtime covers synthetic manifest generation, corruption, auditing, and
+evaluation before artifact serialization. Memory is measured with Python's
+`tracemalloc` and represents peak traced Python allocations, not total
+process resident memory (RSS).
+
+## Statistical Summary and Paired-Bootstrap Conventions
+
+The statistical summary implementation uses the following conventions where
+the research handoff does not specify an exact analysis procedure.
+
+### Paired comparisons
+
+Each pair of corruption types is compared on these binary outcomes:
+
+- `expected_violation_detected`
+- `failure_type_correct`
+
+A benchmark instance is matched across corruption types using the following
+fields:
+
+- `people`
+- `modalities`
+- `sessions`
+- `runs_per_modality`
+- `severity`
+- `seed`
+
+The comparison reports the mean paired difference as the rate for corruption
+A minus the rate for corruption B. Positive values therefore favor A for the
+outcome being measured.
+
+Only valid benchmark artifacts and eligible binary outcomes are used. Records
+with missing pairing fields and duplicate pairing keys are excluded from the
+paired comparison rather than being arbitrarily matched.
+
+### Bootstrap confidence intervals
+
+The implementation uses a paired bootstrap with 10,000 resamples and a fixed
+base random seed of `20261019` for reproducibility. Each resample draws matched
+instances with replacement, preserving the pairing between corruption types.
+The reported 95% confidence interval uses the percentile method.
+
+At least two matched instances are required to calculate a bootstrap interval.
+When fewer than two are available, the interval is reported as null and the
+comparison status is `insufficient_pairs`. A point estimate from a single
+matched instance is descriptive only and must not be interpreted as evidence
+of equivalent performance.
+
+The number of matched instances, point estimate, interval, and comparison
+status should be considered together when interpreting results. A computable
+interval from a small sample does not, by itself, establish that the estimate
+is sufficiently precise for a scientific conclusion.
+
+### Scope and limitations
+
+These paired comparisons currently cover expected-violation detection and
+failure-type correctness. They do not constitute a comparison of every
+localization metric or runtime and memory measurement.
+
+Runtime scaling results must be interpreted as descriptive measurements.
+The smoke run has only one participant-count level and cannot support
+adjacent-size comparisons or conclusions about scaling behavior. Full
+benchmark measurements are required for that analysis.
+
+These statistical choices are implementation conventions, not claims that
+the original research handoff prescribed this exact estimator, pairing key,
+resampling count, seed, or interval method.

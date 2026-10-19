@@ -247,10 +247,16 @@ def check_i4_derivative_lineage(
     for record in derivative_records:
         missing_fields = []
 
-        if not record.derivative_recipe_sha256:
+        if (
+            not record.derivative_recipe_sha256
+            or not record.derivative_recipe_sha256.strip()
+        ):
             missing_fields.append("derivative_recipe_sha256")
 
-        if not record.derivative_path:
+        if (
+            not record.derivative_path
+            or not record.derivative_path.strip()
+        ):
             missing_fields.append("derivative_path")
 
         if missing_fields:
@@ -300,7 +306,7 @@ def check_i4_derivative_lineage(
         missing_parent_fields = tuple(
             field
             for field, value in required_parent_fields.items()
-            if value is None or value == ""
+            if value is None or not value.strip()
         )
 
         if missing_parent_fields:
@@ -336,10 +342,13 @@ def check_i4_derivative_lineage(
     derivative_key_groups: dict[tuple[Any, ...], list[Any]] = {}
 
     for record in derivative_records:
-        if not record.derivative_recipe_sha256:
+        if (
+            not record.derivative_recipe_sha256
+            or not record.derivative_recipe_sha256.strip()
+        ):
             continue
 
-        if not record.derivative_path:
+        if not record.derivative_path or not record.derivative_path.strip():
             continue
 
         derivative_key = (
