@@ -113,7 +113,6 @@ def _inject_c1_namespace_stripping(
         "affected_keys": affected_keys,
         "expected_violations": [
             "I1.namespace_completeness",
-            "I3.person_pairing",
         ],
     }
 
@@ -178,27 +177,51 @@ def _inject_c2_canonicalization_collision(
 
         person_to_indices.setdefault(record.person_key, []).append(index)
 
-    eligible_people = sorted(person_to_indices)
+    # A collision is only valid within the same namespace and version.
+    # Group people first so random selection cannot create incompatible pairs.
+    people_by_dataset: dict[tuple[Any, Any], list[tuple[Any, ...]]] = {}
 
-    if len(eligible_people) < affected_count * 2:
+    for person_key in sorted(person_to_indices):
+        dataset_key = (person_key[0], person_key[1])
+        people_by_dataset.setdefault(dataset_key, []).append(person_key)
+
+    # Build candidate pairs without reusing a person across collision instances.
+    candidate_pairs = []
+
+    for dataset_key in sorted(people_by_dataset):
+        people = people_by_dataset[dataset_key]
+        for i in range(len(people)):
+            for j in range(i + 1, len(people)):
+                candidate_pairs.append((people[i], people[j]))
+
+    rng.shuffle(candidate_pairs)
+
+    selected_pairs = []
+    used_people = set()
+
+    for donor_person, target_person in candidate_pairs:
+        if donor_person in used_people or target_person in used_people:
+            continue
+
+        selected_pairs.append((donor_person, target_person))
+        used_people.add(donor_person)
+        used_people.add(target_person)
+
+        if len(selected_pairs) == affected_count:
+            break
+
+    if len(selected_pairs) < affected_count:
         raise ValueError(
-            "C2 requires at least two distinct eligible person keys "
-            "per collision instance."
+            "C2 requires enough distinct eligible people to form "
+            "the requested number of collision instances within "
+            "matching dataset namespaces and versions."
         )
-
-    selected_people = rng.sample(
-        eligible_people,
-        affected_count * 2,
-    )
 
     corrupted = list(records)
     affected_keys = []
     operations = []
 
-    for pair_index in range(affected_count):
-        donor_person = selected_people[2 * pair_index]
-        target_person = selected_people[2 * pair_index + 1]
-
+    for donor_person, target_person in selected_pairs:
         donor_index = rng.choice(person_to_indices[donor_person])
         target_index = rng.choice(person_to_indices[target_person])
 

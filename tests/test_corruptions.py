@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from neurofusion_qa.manifest import ManifestRecord
 from neurofusion_qa.identity import canonicalize_participant_id
 from neurofusion_qa.identity import check_i6_metric_denominator_traceability
@@ -126,6 +128,7 @@ def test_c1_truth_contains_seed_and_affected_keys():
     assert truth["seed"] == 12345
     assert "affected_keys" in truth
     assert len(truth["affected_keys"]) == 1
+    assert truth["expected_violations"] == ["I1.namespace_completeness"]
 
 
 def test_c1_is_deterministic_for_same_seed():
@@ -288,6 +291,69 @@ def test_c2_does_not_modify_original_records():
 
     assert records == original
 
+def test_c2_selects_collision_pairs_within_namespace_and_version():
+    records = build_synthetic_manifest(
+        people=8,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+    )
+
+    # Split participants into two namespace groups while keeping each
+    # participant's modality records together.
+    mixed_records = [
+        replace(
+            record,
+            dataset_namespace=(
+                "dataset_b"
+                if int(record.participant_id.removeprefix("sub-")) > 4
+                else "dataset_a"
+            ),
+            dataset_version="1.0",
+        )
+        for record in records
+    ]
+
+    corrupted, truth = inject_corruption(
+        mixed_records,
+        corruption="C2_canonicalization_collision",
+        affected_count=2,
+        seed=20270915,
+    )
+
+    assert len(truth["operations"]) == 2
+    assert len(truth["affected_keys"]) == 2
+    # Each collision operation must pair records from the same
+    # namespace and dataset version.
+    for operation in truth["operations"]:
+        donor = mixed_records[operation["donor_row_index"]]
+        target = mixed_records[operation["target_row_index"]]
+
+        assert donor.dataset_namespace == target.dataset_namespace
+        assert donor.dataset_version == target.dataset_version
+
+        # The operation must produce the declared canonical identity.
+        assert (
+            canonicalize_participant_id(operation["new_target_participant_id"])
+            == operation["canonical_participant_id"]
+        )
+
+    selected_people = set()
+
+    for operation in truth["operations"]:
+        donor = mixed_records[operation["donor_row_index"]]
+        target = mixed_records[operation["target_row_index"]]
+
+        assert donor.person_key not in selected_people
+        assert target.person_key not in selected_people
+
+        selected_people.add(donor.person_key)
+        selected_people.add(target.person_key)
+
+    # Namespace and version must not change during C2.
+    for original, changed in zip(mixed_records, corrupted):
+        assert changed.dataset_namespace == original.dataset_namespace
+        assert changed.dataset_version == original.dataset_version
 
 def test_c2_truth_contains_required_metadata():
     records = [
