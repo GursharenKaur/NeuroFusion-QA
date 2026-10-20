@@ -1,0 +1,231 @@
+{
+  "completed_jobs": 7,
+  "config_path": "config/identityguard_protocol.yaml",
+  "elapsed_seconds": 1.4884047000014107,
+  "failed_jobs": 0,
+  "failures": [],
+  "mode": "smoke",
+  "output_root": "outputs/smoke_validation_20261020_c0",
+  "results": [
+    {
+      "detection": {
+        "affected_key_count": 0,
+        "detected": false,
+        "detected_expected_violation_count": 0,
+        "expected_violation_count": 0,
+        "expected_violation_detected": false,
+        "failure_type_correct": false,
+        "localization_false_positives": 0,
+        "localization_true_positives": 0,
+        "localized_key_count": 0
+      },
+      "experiment_id": "synthetic_p16_m2_s1_r1_C0_clean_sev0.01_seed007",
+      "job_directory": "outputs/smoke_validation_20261020_c0\\synthetic_p16_m2_s1_r1_C0_clean_sev0.01_seed007",
+      "output_hashes": {
+        "audit_report.json": "9a355c1f7fd71fec021cbbae729ff326aef0a7489c90dc2dedf041b8cd7cb566",
+        "baseline_evaluation.json": "8b08ea841649bc3d77aa22c8c4d0f4ce9fa567754704ad4b63233675b604862f",
+        "baselines.json": "1d4487a1897bea8f89b666be596572d9e1d90d462a4e15174579df2e82e45bf1",
+        "config.snapshot.yaml": "cdbf4f8bc68469b1f1a90724de501e69f6ac4967799e39eec0df649241441706",
+        "corrupted_manifest.tsv": "c0d83233715048f2baea1728417901a79cb839bb7af2be37dd1fd909a6a6c008",
+        "environment.txt": "cace069119315cc57277c54365098aee0e82c9c50b2a61783b76c21b47bf716c",
+        "git_commit.txt": "96154c6138a6a9298c42334df4cff8233b8ac9923921a8cfbd043a2d93e4106b",
+        "metrics.json": "7d06c02482227c6f3923f2dd1257686a9f939d17b5cb09b5dedbdfb0506c142d",
+        "parent_manifest.sha256": "1dfe39c2c646bc4aa721c8aa459891d4de8f06d6c80e1faba13ffade5380d214",
+        "stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.log": "b07305f7fc8c1e844fff91bf3fafa7a315fe48cd2b2ccb34980d67a744a81d72",
+        "truth.json": "f4086789d8ea9e1872c3326a46b9fb2ab6b692580488949f2c93ccd3bfac01c9"
+      },
+      "peak_memory_bytes": 1116691,
+      "runtime_seconds": 0.020294099998864112
+    },
+    {
+      "detection": {
+        "affected_key_count": 1,
+        "detected": true,
+        "detected_expected_violation_count": 1,
+        "expected_violation_count": 1,
+        "expected_violation_detected": true,
+        "failure_type_correct": true,
+        "localization_false_positives": 0,
+        "localization_true_positives": 1,
+        "localized_key_count": 1
+      },
+      "experiment_id": "synthetic_p16_m2_s1_r1_C1_namespace_stripping_sev0.01_seed007",
+      "job_directory": "outputs/smoke_validation_20261020_c0\\synthetic_p16_m2_s1_r1_C1_namespace_stripping_sev0.01_seed007",
+      "output_hashes": {
+        "audit_report.json": "9735b9a1ac541715e8e385ac3a0b8b23ad8b8996ef151950084800adcdb60a2f",
+        "baseline_evaluation.json": "bf5d76746e5878d39a1739a61979e03c2fad5c327320aa9c75759990deb7e35d",
+        "baselines.json": "1d4487a1897bea8f89b666be596572d9e1d90d462a4e15174579df2e82e45bf1",
+        "config.snapshot.yaml": "cdbf4f8bc68469b1f1a90724de501e69f6ac4967799e39eec0df649241441706",
+        "corrupted_manifest.tsv": "1b1129f68ab54fc9e28b96f0c5310eab14418f22ace5413f825cd668a1ce9a30",
+        "environment.txt": "cace069119315cc57277c54365098aee0e82c9c50b2a61783b76c21b47bf716c",
+        "git_commit.txt": "96154c6138a6a9298c42334df4cff8233b8ac9923921a8cfbd043a2d93e4106b",
+        "metrics.json": "d08d4c520da093eb170f49dd866f3bd9f73d1918e58f7f7f352b256d7e3c3107",
+        "parent_manifest.sha256": "1dfe39c2c646bc4aa721c8aa459891d4de8f06d6c80e1faba13ffade5380d214",
+        "stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.log": "beee628301793c0f6be8112c61ad6573b81d124676fe2ab37eaf25a66da3ab3a",
+        "truth.json": "7aa41a1d2e3884595ecf8b622ecb2f32356a42af359612ab20127574c7c6d353"
+      },
+      "peak_memory_bytes": 1095942,
+      "runtime_seconds": 0.02327099999820348
+    },
+    {
+      "detection": {
+        "affected_key_count": 1,
+        "detected": true,
+        "detected_expected_violation_count": 2,
+        "expected_violation_count": 2,
+        "expected_violation_detected": true,
+        "failure_type_correct": true,
+        "localization_false_positives": 0,
+        "localization_true_positives": 1,
+        "localized_key_count": 1
+      },
+      "experiment_id": "synthetic_p16_m2_s1_r1_C2_canonicalization_collision_sev0.01_seed007",
+      "job_directory": "outputs/smoke_validation_20261020_c0\\synthetic_p16_m2_s1_r1_C2_canonicalization_collision_sev0.01_seed007",
+      "output_hashes": {
+        "audit_report.json": "2e68dda29f7a07e2b2caf92df15b6ff0127e32ac5174653a9604fd3c70150ae9",
+        "baseline_evaluation.json": "7eae8fa427bb7e94ad8b0a3e23201d2cdc4f36fc61e842003fffbcc43f454952",
+        "baselines.json": "741d36ca985e9715ab6fcfc21ed96978299667e36597194a968a7c7e027ba9ee",
+        "config.snapshot.yaml": "cdbf4f8bc68469b1f1a90724de501e69f6ac4967799e39eec0df649241441706",
+        "corrupted_manifest.tsv": "fd9f0743e85231a81fb0c5ef81e2cb309864567adbf8c7e0e1f82908c393102e",
+        "environment.txt": "cace069119315cc57277c54365098aee0e82c9c50b2a61783b76c21b47bf716c",
+        "git_commit.txt": "96154c6138a6a9298c42334df4cff8233b8ac9923921a8cfbd043a2d93e4106b",
+        "metrics.json": "7c5875af694177be3006024e361d7ad33dab71dd0adaaa48a8c1a424781fcd70",
+        "parent_manifest.sha256": "1dfe39c2c646bc4aa721c8aa459891d4de8f06d6c80e1faba13ffade5380d214",
+        "stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.log": "afb0d00536b36c5a425f8740cf67acdf029e72bbba719ace8f9ab7532b8a189a",
+        "truth.json": "d082711d894ba0f40ca060e7e8886464070bd53c2d9eac568bc8d109e238a867"
+      },
+      "peak_memory_bytes": 1099278,
+      "runtime_seconds": 0.041569699998945
+    },
+    {
+      "detection": {
+        "affected_key_count": 1,
+        "detected": true,
+        "detected_expected_violation_count": 4,
+        "expected_violation_count": 4,
+        "expected_violation_detected": true,
+        "failure_type_correct": true,
+        "localization_false_positives": 0,
+        "localization_true_positives": 1,
+        "localized_key_count": 1
+      },
+      "experiment_id": "synthetic_p16_m2_s1_r1_C3_duplicate_propagation_sev0.01_seed007",
+      "job_directory": "outputs/smoke_validation_20261020_c0\\synthetic_p16_m2_s1_r1_C3_duplicate_propagation_sev0.01_seed007",
+      "output_hashes": {
+        "audit_report.json": "9de844d221f2e0bf9da1537cfbc9ccc69e8518918c1865420ca0596bc27b68f8",
+        "baseline_evaluation.json": "e757fac1f064df33dd05d6acfdd2170b78d41878e4945eaaf1b3e80aecd7a517",
+        "baselines.json": "a6de4dcf452110d6e480149fe400fe8a5d2744270f83ad2c544aab803cb45bb3",
+        "config.snapshot.yaml": "cdbf4f8bc68469b1f1a90724de501e69f6ac4967799e39eec0df649241441706",
+        "corrupted_manifest.tsv": "67a5cc2732a9a7f9fa848bf614701e460731d90544e528464d8d24339f1026fe",
+        "environment.txt": "cace069119315cc57277c54365098aee0e82c9c50b2a61783b76c21b47bf716c",
+        "git_commit.txt": "96154c6138a6a9298c42334df4cff8233b8ac9923921a8cfbd043a2d93e4106b",
+        "metrics.json": "81e6ce773e6db0263611fa9219226c1c80eea05dd8785d08b2286841fb77e388",
+        "parent_manifest.sha256": "1dfe39c2c646bc4aa721c8aa459891d4de8f06d6c80e1faba13ffade5380d214",
+        "stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.log": "5bd7e462c3ea9aad82f5989734b19fc30cd6c4ecb9cab33d6f20d3bef88ee63c",
+        "truth.json": "586330ca2763dde43d500bc20d1d32249aa23cffc000541745026182bcbb5662"
+      },
+      "peak_memory_bytes": 1102466,
+      "runtime_seconds": 0.018081900001561735
+    },
+    {
+      "detection": {
+        "affected_key_count": 1,
+        "detected": true,
+        "detected_expected_violation_count": 1,
+        "expected_violation_count": 1,
+        "expected_violation_detected": true,
+        "failure_type_correct": true,
+        "localization_false_positives": 0,
+        "localization_true_positives": 1,
+        "localized_key_count": 1
+      },
+      "experiment_id": "synthetic_p16_m2_s1_r1_C4_cross_modal_permutation_sev0.01_seed007",
+      "job_directory": "outputs/smoke_validation_20261020_c0\\synthetic_p16_m2_s1_r1_C4_cross_modal_permutation_sev0.01_seed007",
+      "output_hashes": {
+        "audit_report.json": "a1039ee1d77f193e9b4421ca4f2be742b29ccedeeb5c52fe9630000e9464c872",
+        "baseline_evaluation.json": "db2c32a30602418c44ce4c2af650e1014b70bd7baa2e10d7ede7ae2c3e493c0d",
+        "baselines.json": "279a5d29c8e0584475b20ed488c0a8596f459b755e9d6a200bcc854f1a5d4cb5",
+        "config.snapshot.yaml": "cdbf4f8bc68469b1f1a90724de501e69f6ac4967799e39eec0df649241441706",
+        "corrupted_manifest.tsv": "3fcaf96fa6c6763355cca30c103e0434a944a0fac11f8655bc40ebe3898a8052",
+        "environment.txt": "cace069119315cc57277c54365098aee0e82c9c50b2a61783b76c21b47bf716c",
+        "git_commit.txt": "96154c6138a6a9298c42334df4cff8233b8ac9923921a8cfbd043a2d93e4106b",
+        "metrics.json": "ecde0b8abc883fb7f20cfcf244811e8d8e3463f5313a6e3a16c94c8673b756ae",
+        "parent_manifest.sha256": "1dfe39c2c646bc4aa721c8aa459891d4de8f06d6c80e1faba13ffade5380d214",
+        "stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.log": "a1a4e8c90fb022269fafea2e45cce33845b4627650f1c2b4aaac45bb6c273bf9",
+        "truth.json": "83fedc530f44acf7b8d999398a78c6e3b54eea2f1577e3dd1f4d21c143e83ded"
+      },
+      "peak_memory_bytes": 1095232,
+      "runtime_seconds": 0.01669960000072024
+    },
+    {
+      "detection": {
+        "affected_key_count": 1,
+        "detected": true,
+        "detected_expected_violation_count": 1,
+        "expected_violation_count": 1,
+        "expected_violation_detected": true,
+        "failure_type_correct": true,
+        "localization_false_positives": 0,
+        "localization_true_positives": 1,
+        "localized_key_count": 1
+      },
+      "experiment_id": "synthetic_p16_m2_s1_r1_C5_subject_split_leakage_sev0.01_seed007",
+      "job_directory": "outputs/smoke_validation_20261020_c0\\synthetic_p16_m2_s1_r1_C5_subject_split_leakage_sev0.01_seed007",
+      "output_hashes": {
+        "audit_report.json": "60efb27ced39b6742bd673a5f89394f844f920b8227ad4c36565dc4559bb187c",
+        "baseline_evaluation.json": "c26534a4b52bfadb7967b1cd5f45059b31736850bd19bc949159e68565a32e2a",
+        "baselines.json": "1d4487a1897bea8f89b666be596572d9e1d90d462a4e15174579df2e82e45bf1",
+        "config.snapshot.yaml": "cdbf4f8bc68469b1f1a90724de501e69f6ac4967799e39eec0df649241441706",
+        "corrupted_manifest.tsv": "749b984c1fd9db6c665c915375f371a4de6cf47015962a4e7c897a68169392b0",
+        "environment.txt": "cace069119315cc57277c54365098aee0e82c9c50b2a61783b76c21b47bf716c",
+        "git_commit.txt": "96154c6138a6a9298c42334df4cff8233b8ac9923921a8cfbd043a2d93e4106b",
+        "metrics.json": "5e1e34e4adbea01549c612ee866278a347ff94a91d80d9361f4694a51ed6aee4",
+        "parent_manifest.sha256": "1dfe39c2c646bc4aa721c8aa459891d4de8f06d6c80e1faba13ffade5380d214",
+        "stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.log": "ebc7096404f5fb28a70aee72d87e900842cfc9468c33762282606b9d3d1283c9",
+        "truth.json": "656ff54915ad44401af926b75eb47172e720decb5955446c7e8af094dea863e9"
+      },
+      "peak_memory_bytes": 1094752,
+      "runtime_seconds": 0.014653499998530606
+    },
+    {
+      "detection": {
+        "affected_key_count": 1,
+        "detected": true,
+        "detected_expected_violation_count": 1,
+        "expected_violation_count": 1,
+        "expected_violation_detected": true,
+        "failure_type_correct": true,
+        "localization_false_positives": 0,
+        "localization_true_positives": 1,
+        "localized_key_count": 1
+      },
+      "experiment_id": "synthetic_p16_m2_s1_r1_C6_denominator_mismatch_sev0.01_seed007",
+      "job_directory": "outputs/smoke_validation_20261020_c0\\synthetic_p16_m2_s1_r1_C6_denominator_mismatch_sev0.01_seed007",
+      "output_hashes": {
+        "audit_report.json": "4b93d3a95fee857c59beec269c4736126ab1040bde2495f31cf84e0a3737e7b2",
+        "baseline_evaluation.json": "8ccb5e4c0bdf8cb922f44d903610b36b916097840428852531024c71ce4dc167",
+        "baselines.json": "756bc78900ef409f568c0dad39a7adeb450eb1832ec2b31be677b4247cf88b06",
+        "config.snapshot.yaml": "cdbf4f8bc68469b1f1a90724de501e69f6ac4967799e39eec0df649241441706",
+        "corrupted_manifest.tsv": "c0d83233715048f2baea1728417901a79cb839bb7af2be37dd1fd909a6a6c008",
+        "environment.txt": "cace069119315cc57277c54365098aee0e82c9c50b2a61783b76c21b47bf716c",
+        "git_commit.txt": "96154c6138a6a9298c42334df4cff8233b8ac9923921a8cfbd043a2d93e4106b",
+        "metrics.json": "0870a2a52aaa3c36733d13eeeb66052cb8d140555b6e039d0f42550d594fac82",
+        "parent_manifest.sha256": "1dfe39c2c646bc4aa721c8aa459891d4de8f06d6c80e1faba13ffade5380d214",
+        "stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.log": "204464d6cd61bfff04e17a8d30c5d10554d0757eb340c0727c50c11f8bed9368",
+        "truth.json": "d15541a03466f2c1d344bb6dd709ec0fda1c69d087323891131c6ad63db6ecdf"
+      },
+      "peak_memory_bytes": 1099344,
+      "runtime_seconds": 0.014707099999213824
+    }
+  ],
+  "run_finished_utc": "2026-10-20T14:08:41.772249+00:00",
+  "run_started_utc": "2026-10-20T14:08:40.284090+00:00",
+  "selected_jobs": 7
+}

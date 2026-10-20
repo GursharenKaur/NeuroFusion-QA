@@ -268,7 +268,7 @@ def main() -> int:
             modalities=(2,),
             sessions=(1,),
             runs_per_modality=(1,),
-            corruptions=CORRUPTIONS,
+            corruptions=("C0_clean", *CORRUPTIONS),
             severities=(0.01,),
             seeds=(7,),
         )
