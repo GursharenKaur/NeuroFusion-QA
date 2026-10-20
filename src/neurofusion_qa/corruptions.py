@@ -722,20 +722,40 @@ def _inject_c4_cross_modal_permutation(
 
     eligible_people = sorted(eligible_by_person)
 
-    if len(eligible_people) < 2:
+    people_by_namespace_version: dict[tuple[Any, Any], list[tuple[Any, ...]]] = {}
+
+    for person_key in eligible_people:
+        namespace_version = (person_key[0], person_key[1])
+        people_by_namespace_version.setdefault(
+            namespace_version, []
+        ).append(person_key)
+
+    eligible_source_people = [
+        person_key
+        for person_key in eligible_people
+        if len(
+            people_by_namespace_version[
+                (person_key[0], person_key[1])
+            ]
+        ) >= 2
+    ]
+
+    if len(eligible_source_people) < 1:
         raise ValueError(
-            "C4 requires at least two distinct participant identities."
+            "C4 requires at least two distinct participant identities "
+            "in the same dataset namespace/version."
         )
 
-    if affected_count > len(eligible_people):
+    if affected_count > len(eligible_source_people):
         raise ValueError(
-            "affected_count cannot exceed the number of eligible person keys."
+            "affected_count cannot exceed the number of eligible source "
+            "person keys with same-namespace/version alternatives."
         )
 
     rng = random.Random(seed)
 
     selected_source_people = rng.sample(
-        eligible_people,
+        eligible_source_people,
         affected_count,
     )
 
@@ -747,7 +767,7 @@ def _inject_c4_cross_modal_permutation(
         source_index = rng.choice(
             eligible_by_person[source_person_key]
         )
-        source = corrupted[source_index]
+        source = records[source_index]
 
         possible_targets = [
             person_key
@@ -767,7 +787,7 @@ def _inject_c4_cross_modal_permutation(
 
         target_indices = eligible_by_person[target_person_key]
         target_index = rng.choice(target_indices)
-        target = corrupted[target_index]
+        target = records[target_index]
 
         original_source_key = source.person_key
         new_participant_id = target.participant_id

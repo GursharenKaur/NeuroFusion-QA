@@ -962,6 +962,102 @@ def test_c4_rejects_invalid_affected_count():
             "Expected ValueError for invalid affected_count."
         )
 
+
+def test_c4_ignores_people_without_same_namespace_version_targets():
+    records = [
+        # Only participant in dataset_a: cannot be a C4 source or target.
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="T1w",
+        ),
+        # Two participants in dataset_b: eligible for C4.
+        ManifestRecord(
+            dataset_namespace="dataset_b",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="T1w",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_b",
+            dataset_version="1.0",
+            participant_id="sub-03",
+            modality="T1w",
+        ),
+    ]
+
+    corrupted, truth = inject_corruption(
+        records,
+        corruption="C4_cross_modal_permutation",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    assert len(corrupted) == len(records)
+    assert len(truth["operations"]) == 1
+
+    operation = truth["operations"][0]
+    assert operation["original_person_key"][0] == "dataset_b"
+    assert operation["new_person_key"][0] == "dataset_b"
+    assert operation["original_person_key"] != operation["new_person_key"]
+
+
+def test_c4_target_identity_comes_from_original_manifest():
+    records = [
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="T1w",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-01",
+            modality="bold",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="T1w",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-02",
+            modality="bold",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-03",
+            modality="T1w",
+        ),
+        ManifestRecord(
+            dataset_namespace="dataset_a",
+            dataset_version="1.0",
+            participant_id="sub-03",
+            modality="bold",
+        ),
+    ]
+
+    corrupted, truth = inject_corruption(
+        records,
+        corruption="C4_cross_modal_permutation",
+        affected_count=2,
+        seed=17,
+    )
+
+    for operation in truth["operations"]:
+        target_index = operation["target_row_index"]
+        source_index = operation["source_row_index"]
+
+        assert corrupted[source_index].participant_id == records[target_index].participant_id
+        assert operation["new_person_key"] == corrupted[source_index].person_key
+
+
 def test_c5_creates_subject_split_leakage():
     records = [
         ManifestRecord(
