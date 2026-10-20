@@ -560,9 +560,46 @@ def test_c3_truth_contains_required_metadata():
     assert "affected_keys" in truth
     assert "expected_violations" in truth
 
-    assert "I2.cardinality_mismatch" in truth["expected_violations"]
-    assert "I4.repeated_row" in truth["expected_violations"]
+    assert truth["expected_violations"] == [
+        "I2.cardinality_mismatch",
+        "I4.repeated_row",
+        "I4.repeated_source_path",
+        "I6.denominator_mismatch",
+    ]
 
+def test_c3_ignores_records_with_missing_identity_fields():
+    eligible = ManifestRecord(
+        dataset_namespace="dataset_a",
+        dataset_version="1.0",
+        participant_id="sub-01",
+        modality="bold",
+        source_path="sub-01_bold.nii.gz",
+        source_sha256="hash-01",
+    )
+    missing_namespace = ManifestRecord(
+        dataset_namespace=None,
+        dataset_version="1.0",
+        participant_id="sub-02",
+        modality="bold",
+        source_path="sub-02_bold.nii.gz",
+        source_sha256="hash-02",
+    )
+
+    corrupted, truth = inject_corruption(
+        [eligible, missing_namespace],
+        corruption="C3_duplicate_propagation",
+        affected_count=1,
+        seed=20270915,
+    )
+
+    assert len(corrupted) == 3
+    assert corrupted[:2] == [eligible, missing_namespace]
+    assert corrupted[2] == eligible
+
+    operation = truth["operations"][0]
+    assert operation["source_row_index"] == 0
+    assert operation["duplicated_row_index"] == 2
+    assert operation["affected_person_key"] == eligible.person_key
 
 def test_c3_truth_records_acquisition_key():
     records = [
