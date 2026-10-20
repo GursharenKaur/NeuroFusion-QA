@@ -28,6 +28,7 @@ def inspect_job(job_dir: Path) -> dict:
     marker = load_json(job_dir / "completed.json")
     metrics = load_json(job_dir / "metrics.json")
     truth = load_json(job_dir / "truth.json")
+    baseline_evaluation = load_json(job_dir / "baseline_evaluation.json")
 
     hashes = marker.get("output_hashes", {})
     hash_errors = []
@@ -100,6 +101,13 @@ def inspect_job(job_dir: Path) -> dict:
         "artifact_hashes_valid": not hash_errors,
         "artifact_errors": "; ".join(hash_errors),
         "job_directory": str(job_dir.resolve()),
+        "baseline_evaluation_status": baseline_evaluation.get("status"),
+        "baseline_scored_count": baseline_evaluation.get("scored_baseline_count"),
+        "clean_control": baseline_evaluation.get("clean_control", False),
+        "clean_false_alarm_count": baseline_evaluation.get("clean_false_alarm_count"),
+        "clean_false_alarm_denominator": baseline_evaluation.get(
+            "clean_false_alarm_denominator"
+        ),
     }
 
 
@@ -634,9 +642,32 @@ def main() -> int:
         csv_path.write_text("", encoding="utf-8")
 
     groups = defaultdict(list)
+    clean_controls = []
+
     for row in rows:
-        if row["artifact_hashes_valid"]:
+        if not row["artifact_hashes_valid"]:
+            continue
+
+        if row["corruption"] == "C0_clean":
+            clean_controls.append(row)
+        else:
             groups[row["corruption"]].append(row)
+
+    clean_false_alarm_count = sum(
+        row["clean_false_alarm_count"]
+        for row in clean_controls
+        if isinstance(row.get("clean_false_alarm_count"), int)
+        and not isinstance(row.get("clean_false_alarm_count"), bool)
+        and row["clean_false_alarm_count"] >= 0
+    )
+
+    clean_false_alarm_denominator = sum(
+        row["clean_false_alarm_denominator"]
+        for row in clean_controls
+        if isinstance(row.get("clean_false_alarm_denominator"), int)
+        and not isinstance(row.get("clean_false_alarm_denominator"), bool)
+        and row["clean_false_alarm_denominator"] >= 0
+    )
 
     paired_bootstrap = paired_bootstrap_comparisons(rows)
     runtime_scaling = runtime_scaling_summary(rows)
@@ -652,6 +683,19 @@ def main() -> int:
             for corruption, group in sorted(groups.items())
         },
         "invalid_job_details": invalid_jobs,
+        "clean_control_summary": {
+            "valid_clean_control_jobs": len(clean_controls),
+            "scored_false_alarm_count": clean_false_alarm_count,
+            "scored_prediction_denominator": clean_false_alarm_denominator,
+            "scored_false_alarm_rate": safe_rate(
+                clean_false_alarm_count,
+                clean_false_alarm_denominator,
+            ),
+            "scope": (
+                "Baseline-specific scored predictions on C0_clean only; "
+                "not a protocol-wide false-alarm rate."
+            ),
+        },
         "paired_bootstrap": paired_bootstrap,
         "runtime_scaling": runtime_scaling,
         "statistical_methods": {

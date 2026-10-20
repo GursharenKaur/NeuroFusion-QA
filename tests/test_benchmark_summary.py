@@ -1,6 +1,12 @@
+import json
+from pathlib import Path
+
 import pytest
+
+from scripts import summarize_collision_benchmark as summarizer
 from scripts.summarize_collision_benchmark import (
     exact_binomial_ci,
+    inspect_job,
     paired_bootstrap_comparisons,
     runtime_scaling_summary,
     runtime_summary,
@@ -237,3 +243,211 @@ def test_runtime_scaling_does_not_match_different_seeds():
     assert comparison["matched_configurations"] == 0
     assert comparison["runtime_ratio_n"] == 0
     assert comparison["median_runtime_ratio"] is None
+
+
+from scripts.summarize_collision_benchmark import inspect_job
+
+
+def test_inspect_job_extracts_baseline_evaluation_fields(tmp_path, monkeypatch):
+    """Baseline-evaluation fields must be available in summarized rows."""
+    from scripts import summarize_collision_benchmark as summarizer
+
+    payloads = {
+        "completed.json": {"output_hashes": {}},
+        "metrics.json": {
+            "corruption": "C0_clean",
+            "detection": {},
+        },
+        "truth.json": {"corruption": "C0_clean"},
+        "baseline_evaluation.json": {
+            "status": "complete",
+            "scored_baseline_count": 1,
+            "clean_control": True,
+            "clean_false_alarm_count": 0,
+            "clean_false_alarm_denominator": 1,
+        },
+    }
+
+    def fake_load_json(path):
+        return payloads[Path(path).name]
+
+    monkeypatch.setattr(summarizer, "load_json", fake_load_json)
+    monkeypatch.setattr(
+        summarizer,
+        "REQUIRED_ARTIFACTS",
+        (),
+        raising=False,
+    )
+
+    result = inspect_job(tmp_path)
+
+    assert result["baseline_evaluation_status"] == "complete"
+    assert result["baseline_scored_count"] == 1
+    assert result["clean_control"] is True
+    assert result["clean_false_alarm_count"] == 0
+    assert result["clean_false_alarm_denominator"] == 1
+
+
+def test_clean_control_counts_reject_boolean_and_negative_values():
+    """Counts must not silently accept booleans or negative integers."""
+    rows = [
+        {
+            "artifact_hashes_valid": True,
+            "corruption": "C0_clean",
+            "clean_false_alarm_count": 0,
+            "clean_false_alarm_denominator": 1,
+        },
+        {
+            "artifact_hashes_valid": True,
+            "corruption": "C0_clean",
+            "clean_false_alarm_count": True,
+            "clean_false_alarm_denominator": False,
+        },
+        {
+            "artifact_hashes_valid": True,
+            "corruption": "C0_clean",
+            "clean_false_alarm_count": -1,
+            "clean_false_alarm_denominator": -2,
+        },
+        {
+            "artifact_hashes_valid": False,
+            "corruption": "C0_clean",
+            "clean_false_alarm_count": 100,
+            "clean_false_alarm_denominator": 100,
+        },
+    ]
+
+    count = sum(
+        row["clean_false_alarm_count"]
+        for row in rows
+        if row["artifact_hashes_valid"]
+        and isinstance(row.get("clean_false_alarm_count"), int)
+        and not isinstance(row.get("clean_false_alarm_count"), bool)
+        and row["clean_false_alarm_count"] >= 0
+    )
+    denominator = sum(
+        row["clean_false_alarm_denominator"]
+        for row in rows
+        if row["artifact_hashes_valid"]
+        and isinstance(row.get("clean_false_alarm_denominator"), int)
+        and not isinstance(row.get("clean_false_alarm_denominator"), bool)
+        and row["clean_false_alarm_denominator"] >= 0
+    )
+
+    assert count == 0
+    assert denominator == 1
+
+
+def test_main_generates_clean_control_summary_without_dropping_analyses(
+    tmp_path, monkeypatch
+):
+    """The CLI must aggregate valid C0 controls separately from corruptions."""
+    input_root = tmp_path / "jobs"
+    output_dir = tmp_path / "summary"
+    input_root.mkdir()
+
+    # main() discovers directories containing completed.json.
+    for job_name in ("clean_valid", "corruption_valid", "clean_invalid"):
+        job_dir = input_root / job_name
+        job_dir.mkdir()
+        (job_dir / "completed.json").write_text("{}", encoding="utf-8")
+
+    rows_by_name = {
+        "clean_valid": {
+            "experiment_id": "clean_valid",
+            "corruption": "C0_clean",
+            "artifact_hashes_valid": True,
+            "artifact_errors": "",
+            "clean_false_alarm_count": 1,
+            "clean_false_alarm_denominator": 10,
+        },
+        "corruption_valid": {
+            "experiment_id": "corruption_valid",
+            "corruption": "C1_namespace_stripping",
+            "artifact_hashes_valid": True,
+            "artifact_errors": "",
+            "clean_false_alarm_count": None,
+            "clean_false_alarm_denominator": None,
+        },
+        "clean_invalid": {
+            "experiment_id": "clean_invalid",
+            "corruption": "C0_clean",
+            "artifact_hashes_valid": False,
+            "artifact_errors": "synthetic invalid job",
+            "clean_false_alarm_count": 100,
+            "clean_false_alarm_denominator": 100,
+        },
+    }
+
+    monkeypatch.setattr(
+        summarizer,
+        "inspect_job",
+        lambda job_dir: rows_by_name[job_dir.name],
+    )
+    monkeypatch.setattr(
+        summarizer,
+        "summarize_group",
+        lambda group: {
+            "valid_jobs": len(group),
+            "expected_violation_detection_successes": 1,
+            "expected_violation_detection_trials": 1,
+            "failure_type_correct_jobs": 1,
+            "failure_type_accuracy_trials": 1,
+            "localization_true_positives": 1,
+            "localization_precision_denominator": 1,
+        },
+    )
+    monkeypatch.setattr(
+        summarizer,
+        "paired_bootstrap_comparisons",
+        lambda rows: {"method": "paired percentile bootstrap"},
+    )
+    monkeypatch.setattr(
+        summarizer,
+        "runtime_scaling_summary",
+        lambda rows: {"method": "descriptive runtime scaling"},
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "summarize_collision_benchmark.py",
+            "--input-root",
+            str(input_root),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    result = summarizer.main()
+
+    # The CLI returns 1 when any job is invalid.
+    assert result == 1
+
+    summary = json.loads(
+        (output_dir / "benchmark_summary.json").read_text(encoding="utf-8")
+    )
+
+    clean = summary["clean_control_summary"]
+    assert clean["valid_clean_control_jobs"] == 1
+    assert clean["scored_false_alarm_count"] == 1
+    assert clean["scored_prediction_denominator"] == 10
+    assert clean["scored_false_alarm_rate"] == pytest.approx(0.1)
+
+    # C0 controls are summarized separately, not as a corruption group.
+    assert "C0_clean" not in summary["aggregate_by_corruption"]
+    assert summary["aggregate_by_corruption"]["C1_namespace_stripping"][
+        "valid_jobs"
+    ] == 1
+
+    # The invalid clean-control job is excluded from the clean totals.
+    assert summary["invalid_jobs"] == 1
+    assert clean["scored_false_alarm_count"] != 101
+    assert clean["scored_prediction_denominator"] != 110
+
+    # Existing statistical analyses must remain in the output.
+    assert summary["paired_bootstrap"]["method"] == (
+        "paired percentile bootstrap"
+    )
+    assert summary["runtime_scaling"]["method"] == (
+        "descriptive runtime scaling"
+    )
