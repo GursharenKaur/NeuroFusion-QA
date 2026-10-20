@@ -408,6 +408,8 @@ def _inject_c5_subject_split_leakage(
 
     return corrupted, truth
 
+
+
 def _inject_c6_denominator_mismatch(
     records: list[Any],
     *,
@@ -420,33 +422,23 @@ def _inject_c6_denominator_mismatch(
         raise ValueError("affected_count must be at least 1.")
 
     if not metrics:
-        raise ValueError(
-            "C6 requires at least one metric record."
-        )
+        raise ValueError("C6 requires at least one metric record.")
 
     if populations is None:
-        raise ValueError(
-            "C6 requires population definitions."
-        )
+        raise ValueError("C6 requires population definitions.")
 
     eligible_indices = []
 
     for index, metric in enumerate(metrics):
         population_key = metric.get("population_key")
-
         if not population_key:
             continue
 
         person_keys = populations.get(population_key)
-
-        if person_keys is None:
-            continue
-
         if not person_keys:
             continue
 
         actual_denominator = len(set(person_keys))
-
         if actual_denominator <= 0:
             continue
 
@@ -454,57 +446,47 @@ def _inject_c6_denominator_mismatch(
 
     if affected_count > len(eligible_indices):
         raise ValueError(
-            "affected_count cannot exceed the number of "
-            "eligible metrics."
+            "affected_count cannot exceed the number of eligible metrics."
         )
 
     rng = random.Random(seed)
-
     selected_indices = sorted(
-        rng.sample(
-            eligible_indices,
-            affected_count,
-        )
+        rng.sample(eligible_indices, affected_count)
     )
 
-    corrupted_metrics = [
-        dict(metric)
-        for metric in metrics
-    ]
+    # Validate every selected metric before creating the corrupted copy.
+    for index in selected_indices:
+        denominator = metrics[index].get("denominator")
 
+        if isinstance(denominator, bool) or not isinstance(
+            denominator, int
+        ):
+            raise ValueError(
+                "C6 requires metric denominators to be integers; "
+                "booleans are not valid denominators."
+            )
+
+        if denominator <= 0:
+            raise ValueError(
+                "C6 requires metric denominators to be positive."
+            )
+
+    corrupted_metrics = [dict(metric) for metric in metrics]
     operations = []
     affected_keys = []
 
     for index in selected_indices:
         original = metrics[index]
-
         population_key = original["population_key"]
         person_keys = populations[population_key]
-
         actual_denominator = len(set(person_keys))
-        original_denominator = original.get("denominator")
+        original_denominator = original["denominator"]
 
-        if actual_denominator <= 0:
-            raise ValueError(
-                "C6 requires a population with a positive "
-                "declared denominator."
-            )
-
-        # Choose a deterministic incorrect denominator.
-        if original_denominator == actual_denominator:
-            new_denominator = actual_denominator + 1
-        elif original_denominator > 0:
-            new_denominator = original_denominator + 1
-        else:
-            new_denominator = actual_denominator + 1
-
-        # Ensure the corrupted value is actually different from
-        # the traceable population denominator.
-        if new_denominator == actual_denominator:
-            new_denominator += 1
+        # Always create a denominator that differs from the actual
+        # unique-person count.
+        new_denominator = actual_denominator + 1
 
         corrupted_metrics[index]["denominator"] = new_denominator
-
         affected_keys.append(population_key)
 
         operations.append(
@@ -525,13 +507,10 @@ def _inject_c6_denominator_mismatch(
         "parent_manifest_sha256": _manifest_hash(records),
         "operations": operations,
         "affected_keys": affected_keys,
-        "expected_violations": [
-            "I6.denominator_mismatch",
-        ],
+        "expected_violations": ["I6.denominator_mismatch"],
     }
 
     return corrupted_metrics, truth
-
 
 def inject_corruption(
     records: list[Any],

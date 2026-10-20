@@ -1,3 +1,4 @@
+import pytest
 from dataclasses import replace
 
 from neurofusion_qa.manifest import ManifestRecord
@@ -1367,6 +1368,17 @@ def test_c6_creates_denominator_mismatch():
     assert corrupted_metrics != metrics
     assert truth["corruption"] == "C6_denominator_mismatch"
     assert "I6.denominator_mismatch" in truth["expected_violations"]
+    metric_index = truth["operations"][0]["metric_index"]
+    population_key = corrupted_metrics[metric_index]["population_key"]
+
+    actual_population_size = len(
+        set(populations[population_key])
+    )
+
+    assert (
+        corrupted_metrics[metric_index]["denominator"]
+        != actual_population_size
+    )
 
 
 def test_c6_preserves_population_members():
@@ -1395,12 +1407,9 @@ def test_c6_preserves_population_members():
     ]
 
     populations = {
-        "train_population": {
-            "person_keys": [
-                record.person_key
-                for record in records
-            ]
-        }
+        "train_population": [
+            record.person_key for record in records
+        ]
     }
 
     corrupted_metrics, _ = inject_corruption(
@@ -1417,7 +1426,7 @@ def test_c6_preserves_population_members():
         != metrics[0]["denominator"]
     )
 
-    assert populations["train_population"]["person_keys"] == [
+    assert populations["train_population"] == [
         record.person_key
         for record in records
     ]
@@ -1450,12 +1459,9 @@ def test_c6_changes_only_denominator():
     ]
 
     populations = {
-        "train_population": {
-            "person_keys": [
-                record.person_key
-                for record in records
-            ]
-        }
+        "train_population": [
+            record.person_key for record in records
+        ]
     }
 
     corrupted_metrics, _ = inject_corruption(
@@ -1523,6 +1529,49 @@ def test_c6_does_not_modify_original_metrics():
 
     assert metrics == original_metrics
 
+
+@pytest.mark.parametrize(
+    "invalid_denominator",
+    [True, False, 2.5, "3", None, 0, -1],
+)
+def test_c6_rejects_invalid_denominators_without_returning_corruption(
+    invalid_denominator,
+):
+    records = [
+        ManifestRecord(
+            dataset_namespace="test-dataset",
+            dataset_version="1.0",
+            participant_id="sub-001",
+            split="train",
+        )
+    ]
+
+    metrics = [
+        {
+            "metric_name": "accuracy",
+            "population_key": "train_population",
+            "numerator": 1,
+            "denominator": invalid_denominator,
+        }
+    ]
+
+    populations = {
+        "train_population": [records[0].person_key]
+    }
+
+    original_metrics = [dict(metric) for metric in metrics]
+
+    with pytest.raises(ValueError, match="denominator"):
+        inject_corruption(
+            records,
+            corruption="C6_denominator_mismatch",
+            affected_count=1,
+            seed=42,
+            metrics=metrics,
+            populations=populations,
+        )
+
+    assert metrics == original_metrics
 
 def test_c6_truth_contains_required_metadata():
     records = [
