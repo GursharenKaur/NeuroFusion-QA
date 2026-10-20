@@ -1099,7 +1099,15 @@ def test_c5_creates_subject_split_leakage():
     assert len(corrupted) == len(records)
     assert truth["corruption"] == "C5_subject_split_leakage"
     assert "I5.person_split_leakage" in truth["expected_violations"]
+    affected_key = truth["affected_keys"][0]
+    affected_splits = {
+        record.split
+        for record in corrupted
+        if record.person_key == affected_key
+        and record.split is not None
+    }
 
+    assert len(affected_splits) >= 2
 
 def test_c5_preserves_participant_identity():
     records = [

@@ -318,17 +318,25 @@ def _inject_c5_subject_split_leakage(
 
     # Group records by person, but only consider people who have
     # at least two records currently assigned to the same split.
-    person_split_groups: dict[tuple[Any, ...], dict[str, list[int]]] = {}
-
+    person_split_groups = {}
     for index, record in enumerate(records):
         if record.split is None:
             continue
 
-        person_groups = person_split_groups.setdefault(
-            record.person_key,
-            {}
+        identity_fields = (
+            record.dataset_namespace,
+            record.dataset_version,
+            record.participant_id,
         )
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in identity_fields
+        ):
+            continue
 
+        person_groups = person_split_groups.setdefault(
+            record.person_key, {}
+        )
         person_groups.setdefault(record.split, []).append(index)
 
     eligible_groups = []
