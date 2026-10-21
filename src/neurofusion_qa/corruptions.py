@@ -673,7 +673,6 @@ def _inject_c3_duplicate_propagation(
             "I2.cardinality_mismatch",
             "I4.repeated_row",
             "I4.repeated_source_path",
-            "I6.denominator_mismatch",
         ],
     }
 

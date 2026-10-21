@@ -216,6 +216,17 @@ def main() -> int:
         help="Run a deterministic core subset across sizes, corruptions, severities, and seeds.",
     )
     parser.add_argument(
+        "--corruption",
+        choices=("C0_clean", *CORRUPTIONS),
+        help="Optionally select one corruption type.",
+    )
+    parser.add_argument(
+        "--seeds",
+        nargs="+",
+        type=int,
+        help="Optionally select seeds for the stratified core.",
+    )
+    parser.add_argument(
         "--start-index", type=int, default=0,
         help="Zero-based starting position in the deterministic job list.",
     )
@@ -297,12 +308,13 @@ def main() -> int:
         if args.limit is not None:
             jobs = jobs[:args.limit]
     elif args.stratified_core:
+        selected_seeds = set(args.seeds) if args.seeds else {27, 67}
         jobs = [
             job for job in all_jobs
             if job.modalities == 2
             and job.sessions == 1
             and job.runs_per_modality == 1
-            and job.seed in (17, 67)
+            and job.seed in selected_seeds
         ]
     elif args.full_grid:
         jobs = all_jobs
@@ -313,6 +325,12 @@ def main() -> int:
             if args.limit is not None
             else None
         ]
+
+    if (args.corruption or args.seeds) and not args.stratified_core:
+        parser.error("--corruption and --seeds require --stratified-core")
+
+    if args.corruption:
+        jobs = [job for job in jobs if job.corruption == args.corruption]
 
     print(f"Config:      {config_path}")
     print(f"Output root: {output_root}")

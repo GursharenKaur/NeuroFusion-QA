@@ -1291,13 +1291,8 @@ def run_benchmark_job(
                     corrupted_records
                 )
 
-                clean_population = {
-                    record.person_key for record in clean_records
-                }
-
                 metrics, populations = build_synthetic_metric_evidence(
                     corrupted_records,
-                    denominator_override=len(clean_population) + 1,
                 )
 
             if job.corruption in {

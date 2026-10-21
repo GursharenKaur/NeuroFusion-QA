@@ -565,7 +565,6 @@ def test_c3_truth_contains_required_metadata():
         "I2.cardinality_mismatch",
         "I4.repeated_row",
         "I4.repeated_source_path",
-        "I6.denominator_mismatch",
     ]
 
 def test_c3_ignores_records_with_missing_identity_fields():

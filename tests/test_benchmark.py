@@ -555,7 +555,7 @@ def test_c2_operation_matching_does_not_credit_unrelated_rule():
     assert evaluation.expected_violation_detected is False
     assert evaluation.localization_true_positives == 0
 
-def test_c3_produces_i2_i4_and_i6_benchmark_findings():
+def test_c3_produces_i2_and_i4_benchmark_findings():
     clean_records = build_synthetic_manifest(
         people=16,
         modalities=2,
@@ -574,14 +574,8 @@ def test_c3_produces_i2_i4_and_i6_benchmark_findings():
         corrupted_records
     )
 
-    clean_population = {
-        record.person_key
-        for record in clean_records
-    }
-
     metrics, populations = build_synthetic_metric_evidence(
         corrupted_records,
-        denominator_override=len(clean_population) + 1,
     )
 
     report = audit_manifest(
@@ -599,7 +593,7 @@ def test_c3_produces_i2_i4_and_i6_benchmark_findings():
     assert "I2.cardinality_mismatch" in rule_ids
     assert "I4.repeated_row" in rule_ids
     assert "I4.repeated_source_path" in rule_ids
-    assert "I6.denominator_mismatch" in rule_ids
+    assert "I6.denominator_mismatch" not in rule_ids
 
     evaluation = evaluate_benchmark_findings(
         report.findings,
