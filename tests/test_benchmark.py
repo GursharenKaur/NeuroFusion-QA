@@ -9,11 +9,13 @@ from neurofusion_qa.benchmark import (
     generate_benchmark_jobs,
 )
 from pathlib import Path
+from unittest.mock import Mock
 import pytest
 import json
 import hashlib
 from neurofusion_qa.corruptions import inject_corruption
 from neurofusion_qa.reporting import audit_manifest
+from neurofusion_qa.benchmark import _compress_file_ntfs, _sha256_file
 
 def test_synthetic_manifest_record_count():
     records = build_synthetic_manifest(
@@ -1393,6 +1395,48 @@ def test_resume_reuses_valid_completed_job(tmp_path):
     assert first.detection == second.detection
     assert second.completed is True
 
+
+def test_resume_rejects_manifest_storage_mode_mismatch(tmp_path):
+    from neurofusion_qa.benchmark import BenchmarkJob, run_benchmark_job
+
+    config_path = Path("config/identityguard_protocol.yaml")
+    output_root = tmp_path / "benchmark"
+
+    job = BenchmarkJob(
+        experiment_id="resume_storage_mode_C4",
+        people=16,
+        modalities=2,
+        sessions=1,
+        runs_per_modality=1,
+        corruption="C4_cross_modal_permutation",
+        severity=0.01,
+        affected_count=1,
+        seed=0,
+    )
+
+    first = run_benchmark_job(
+        job,
+        output_root=output_root,
+        config_path=config_path,
+        resume=False,
+        compress_manifest=False,
+    )
+
+    marker_path = Path(first.job_directory) / "completed.json"
+    marker_before = marker_path.read_bytes()
+
+    with pytest.raises(RuntimeError, match="not a valid completed job"):
+        run_benchmark_job(
+            job,
+            output_root=output_root,
+            config_path=config_path,
+            resume=True,
+            compress_manifest=True,
+        )
+
+    # The mismatch must not overwrite or delete the original job.
+    assert marker_path.read_bytes() == marker_before
+
 def test_resume_rejects_job_with_different_parameters_and_preserves_artifacts(
     tmp_path,
 ):
@@ -1969,3 +2013,56 @@ def test_c5_operation_matching_uses_source_row_index():
 
     assert evaluation.expected_violation_detected is True
     assert evaluation.localization_true_positives == 1
+
+def test_compress_file_ntfs_rejects_non_windows(monkeypatch, tmp_path):
+    target = tmp_path / "manifest.tsv"
+    target.write_text("subject_id\tpath\nsub-01\tfile.nii.gz\n")
+
+    monkeypatch.setattr("neurofusion_qa.benchmark.sys.platform", "linux")
+
+    with pytest.raises(RuntimeError, match="only on Windows"):
+        _compress_file_ntfs(target)
+
+
+def test_compress_file_ntfs_rejects_missing_file(tmp_path):
+    with pytest.raises(FileNotFoundError, match="missing benchmark artifact"):
+        _compress_file_ntfs(tmp_path / "missing.tsv")
+
+
+def test_compress_file_ntfs_reports_compact_failure(monkeypatch, tmp_path):
+    target = tmp_path / "manifest.tsv"
+    target.write_text("subject_id\tpath\nsub-01\tfile.nii.gz\n")
+
+    monkeypatch.setattr("neurofusion_qa.benchmark.sys.platform", "win32")
+    monkeypatch.setattr(
+        "neurofusion_qa.benchmark.subprocess.run",
+        lambda *args, **kwargs: Mock(
+            returncode=1,
+            stdout="",
+            stderr="compression failed",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="compression failed"):
+        _compress_file_ntfs(target)
+
+
+@pytest.mark.skipif(
+    __import__("sys").platform != "win32",
+    reason="Requires Windows NTFS compression.",
+)
+def test_compress_file_ntfs_preserves_sha256(tmp_path):
+    target = tmp_path / "manifest.tsv"
+    target.write_text(
+        "subject_id\tpath\nsub-01\tfile.nii.gz\n",
+        encoding="utf-8",
+    )
+
+    original_hash = _sha256_file(target)
+
+    _compress_file_ntfs(target)
+
+    assert _sha256_file(target) == original_hash
+    assert target.read_text(encoding="utf-8") == (
+        "subject_id\tpath\nsub-01\tfile.nii.gz\n"
+    )

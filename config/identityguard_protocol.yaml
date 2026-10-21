@@ -1,10 +1,10 @@
 protocol:
   name: identityguard-bids-isbi2027
   version: "0.1"
-  status: draft_until_G1
-  owner: "[STUDENT]"
-  approved_by: "[PI]"
-  approved_date: null
+  status: approved
+  owner: "Gursharen Kaur Suri"
+  approved_by: "Sukhpal Singh"
+  approved_date: "2026-10-20"
 
 identity:
   person_key:
@@ -69,7 +69,7 @@ synthetic_grid:
 statistics:
   confidence_level: 0.95
   paired_bootstrap_resamples: 10000
-  bootstrap_unit: corruption_instance
+  bootstrap_unit: matched_design_block
   report_numerators_denominators: true
 
 optional_sentinel:

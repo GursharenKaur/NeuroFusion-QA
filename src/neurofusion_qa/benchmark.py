@@ -1032,6 +1032,45 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _compress_file_ntfs(path: Path) -> None:
+    """Compress a file using Windows NTFS compression, preserving its bytes."""
+    if sys.platform != "win32":
+        raise RuntimeError(
+            "NTFS manifest compression is supported only on Windows."
+        )
+
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Cannot compress missing benchmark artifact: {path}"
+        )
+
+    result = subprocess.run(
+        ["compact", "/C", "/Q", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "NTFS compression failed for "
+            f"{path}: {result.stderr.strip() or result.stdout.strip()}"
+        )
+
+    # Verify that Windows actually marked the file as compressed.
+    status = subprocess.run(
+        ["compact", "/Q", "/A", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = status.stdout + status.stderr
+    if status.returncode != 0 or "1 are compressed" not in output:
+        raise RuntimeError(
+            f"NTFS compression could not be verified for {path}: "
+            f"{output.strip()}"
+        )
+
 def _source_tree_hash() -> str:
     """Return a deterministic hash of the Python source tree."""
     root = Path(__file__).resolve().parent
@@ -1098,6 +1137,7 @@ def run_benchmark_job(
     output_root: Path,
     config_path: Path,
     resume: bool = True,
+    compress_manifest: bool = False,
 ) -> BenchmarkJobResult:
     """
     Execute exactly one synthetic benchmark job.
@@ -1115,6 +1155,14 @@ def run_benchmark_job(
 
     requested_job = asdict(job)
     requested_config_sha256 = _sha256_file(config_path)
+    if compress_manifest and sys.platform != "win32":
+        raise RuntimeError(
+            "Manifest compression requires Windows NTFS compression."
+        )
+
+    manifest_storage = (
+        "ntfs_compressed" if compress_manifest else "uncompressed"
+    )
     final_dir = output_root / job.experiment_id
     marker = final_dir / "completed.json"
 
@@ -1130,6 +1178,9 @@ def run_benchmark_job(
                 == requested_config_sha256
                 and isinstance(expected_hashes, dict)
                 and set(expected_hashes) == set(BENCHMARK_OUTPUT_NAMES)
+                and marker_data.get(
+                    "manifest_storage", "uncompressed"
+                ) == manifest_storage
             )
 
             if valid:
@@ -1396,6 +1447,11 @@ def run_benchmark_job(
                 temp_dir / "corrupted_manifest.tsv",
             )
 
+            if compress_manifest:
+                _compress_file_ntfs(
+                    temp_dir / "corrupted_manifest.tsv"
+                )
+
             _write_json(
                 temp_dir / "truth.json",
                 truth,
@@ -1529,6 +1585,7 @@ def run_benchmark_job(
                     "output_hashes": output_hashes,
                     "job": asdict(job),
                     "config_sha256": requested_config_sha256,
+                    "manifest_storage": manifest_storage,
                 },
             )
 

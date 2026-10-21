@@ -211,6 +211,11 @@ def main() -> int:
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--full-grid", action="store_true")
     parser.add_argument(
+        "--stratified-core",
+        action="store_true",
+        help="Run a deterministic core subset across sizes, corruptions, severities, and seeds.",
+    )
+    parser.add_argument(
         "--start-index", type=int, default=0,
         help="Zero-based starting position in the deterministic job list.",
     )
@@ -222,6 +227,11 @@ def main() -> int:
         "--no-resume", action="store_true",
         help="Do not reuse validated completed jobs.",
     )
+    parser.add_argument(
+        "--compress-manifests",
+        action="store_true",
+        help="Use Windows NTFS compression for generated manifests.",
+    )
     args = parser.parse_args()
 
     selected_modes = sum(
@@ -231,8 +241,19 @@ def main() -> int:
     if selected_modes > 1:
         parser.error("--smoke and --full-grid cannot be combined.")
 
-    if not (args.dry_run or args.smoke or args.full_grid):
-        parser.error("Choose --dry-run, --smoke, or --full-grid.")
+    if not (
+        args.dry_run
+        or args.smoke
+        or args.full_grid
+        or args.stratified_core
+        or args.start_index > 0
+        or args.limit is not None
+    ):
+        parser.error(
+            "Choose --dry-run, --smoke, --full-grid, "
+            "--stratified-core, or specify a bounded subset "
+            "with --start-index or --limit."
+        )
 
     if args.dry_run and args.full_grid:
         parser.error("--dry-run and --full-grid cannot be combined.")
@@ -275,6 +296,14 @@ def main() -> int:
         jobs = smoke_jobs
         if args.limit is not None:
             jobs = jobs[:args.limit]
+    elif args.stratified_core:
+        jobs = [
+            job for job in all_jobs
+            if job.modalities == 2
+            and job.sessions == 1
+            and job.runs_per_modality == 1
+            and job.seed in (17, 67)
+        ]
     elif args.full_grid:
         jobs = all_jobs
     else:
@@ -311,7 +340,16 @@ def main() -> int:
 
     config_sha256 = hashlib.sha256(config_path.read_bytes()).hexdigest()
     selected_experiment_ids = [job.experiment_id for job in jobs]
-    mode = "smoke" if args.smoke else "full-grid" if args.full_grid else "subset"
+    base_mode = (
+        "smoke" if args.smoke
+        else "stratified-core" if args.stratified_core
+        else "full-grid" if args.full_grid
+        else "subset"
+    )
+    mode = (
+        f"{base_mode}|manifest_storage="
+        f"{'ntfs_compressed' if args.compress_manifests else 'uncompressed'}"
+    )
 
     try:
         checkpoint = initialize_checkpoint(
@@ -365,6 +403,7 @@ def main() -> int:
                 output_root=output_root,
                 config_path=config_path,
                 resume=not args.no_resume,
+                compress_manifest=args.compress_manifests,
             )
             result_record = {
                 "experiment_id": result.experiment_id,
